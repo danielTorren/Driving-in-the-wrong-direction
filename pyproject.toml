@@ -1,0 +1,53 @@
+[project]
+name = "endogenous-innovation-and-preference-change"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "arviz<1.0.0",
+    "jupyterlab>=4.5.6",
+    "joblib",
+    "matplotlib",
+    "networkx>=3.6.1",
+    "numpy",
+    "pandas>=3.0.1",
+    "python-dateutil",
+    "pyperclip>=1.11.0",
+    "salib",
+    "sbi>=0.25.0",
+    "scikit-learn",
+    "scikit-optimize",
+    "scipy>=1.17.1",
+    "seaborn",
+    "sympy",
+    # Not imported directly anywhere in package/ -- only sbi (via nflows/
+    # pyknos/pyro-ppl) needs it. Listed explicitly so the [tool.uv.sources]
+    # override below actually applies: uv only honours a sources override for
+    # a package that is a direct project dependency, not a purely transitive
+    # one, so without this line torch would silently keep resolving from
+    # PyPI's default (CUDA-bundled) build. See the comment there for why.
+    "torch",
+]
+
+[tool.uv]
+# sbi -> torch is otherwise resolved without checking Windows wheel
+# availability, which can lock onto a torch build that only ships a
+# manylinux wheel (e.g. torch==2.5.1 has no win_amd64 wheel for cp313).
+# This forces the resolver to only pick versions installable on Windows too.
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
+
+[tool.uv.sources]
+# Nothing in this repo trains on GPU (sbi is only used by the
+# NN_multi_round_calibration_* scripts, which are CPU-bound like everything
+# else here) -- pull torch from PyTorch's CPU-only wheel index instead of
+# PyPI's default, which drags in ~2.8GB of unused nvidia-*-cu12 CUDA
+# dependencies on Linux for every fresh environment (e.g. every cluster job).
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

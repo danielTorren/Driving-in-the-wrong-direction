@@ -1,0 +1,29 @@
+results/
+venv/
+.venv/
+package/results/
+package/".ipynb_checkpoints"/
+package/.ipynb_checkpoints/
+package/.ipynb_checkpoints
+".ipynb_checkpoints"/
+.ipynb_checkpoints/
+.ipynb_checkpoints
+*.ipynb filter=strip-notebook-output
+**/__pychache__/
+__pycache__/
+package/generating_data/__pychache__/
+sbi-logs/
+.claude/
+slurm_logs/*
+!slurm_logs/.gitkeep
+
+# LaTeX build artifacts (keep .tex and .pdf)
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.bbl
+*.blg
