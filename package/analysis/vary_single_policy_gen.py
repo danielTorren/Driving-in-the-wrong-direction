@@ -5,8 +5,8 @@ from joblib import Parallel, delayed, dump, load
 import multiprocessing
 from package.resources.run import load_in_controller, generate_data
 from package.resources.utility import createFolder, save_object, produce_name_datetime, params_list_with_seed, get_num_workers
-import shutil  # Add this import at the top of your script
-from pathlib import Path  # For easier path handling
+import shutil
+from pathlib import Path
 
 
 def generate_single_policy_scenarios_with_seeds(base_params, policy_list, repetitions, bounds):

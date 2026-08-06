@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import sem, t
 from sympy import N
 from package.resources.utility import load_object
-from matplotlib.lines import Line2D  # Add this at the top of your file if not already imported
+from matplotlib.lines import Line2D
 from matplotlib.colors import ListedColormap
 
 policy_titles = {
@@ -14,7 +14,6 @@ policy_titles = {
     "Production_subsidy": "Production Subsidy"
 }
 
-# Make sure to reuse the original add_vertical_lines function
 def add_vertical_lines(ax, base_params, color='black', linestyle='--', annotation_height_prop=[0.2, 0.2, 0.2]):
     """
     Adds dashed vertical lines to the plot at specified steps with vertical annotations.
@@ -62,9 +61,8 @@ def plot_combined_policy_figures_with_utilty_flow_cost_both(
     from scipy.stats import sem, t
     from matplotlib.lines import Line2D
 
-    # duration_future, not duration_future - 1: load_in_controller now
-    # actually simulates the full requested duration (see its fixed
-    # off-by-one loop in package.resources.run).
+    # load_in_controller simulates the full duration_future, see
+    # package.resources.run.
     time_steps = np.arange(base_params["duration_future"])
     start = base_params["duration_burn_in"] + base_params["duration_calibration"]
 

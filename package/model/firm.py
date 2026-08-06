@@ -113,17 +113,14 @@ class Firm:
         self.rebate =  0
         self.production_subsidy =  0
 
-        # Backward compatible: absent => naive/permanent expectations (old behaviour).
+        # Absent => naive/permanent expectations.
         self.forward_looking_expectations = self.parameters_firm.get("forward_looking_expectations", False)
 
-        # ICE sales/research bans (optional, backward compatible: absent =>
-        # never banned). Unlike the ICE driving ban (a cost shock fed through
-        # gas_price, see controller._unpack_ice_driving_ban_parameters), these
-        # are hard structural constraints on this firm's own choice sets, so
-        # they're tracked as firm state and refreshed every step from the
-        # booleans controller.py computes off ICE_sales_ban_time/
-        # ICE_research_ban_time -- see next_step(), choose_cars_segments(),
-        # and innovate() below.
+        # ICE sales/research bans (optional, absent => never banned). Unlike the
+        # ICE driving ban, which is a cost shock fed through gas_price, these are
+        # hard constraints on this firm's choice sets, so they are held as firm
+        # state and refreshed each step from controller.py. See next_step(),
+        # choose_cars_segments() and innovate() below.
         self.ice_sales_ban_active = False
         self.ice_research_ban_active = False
 
@@ -169,7 +166,7 @@ class Firm:
         """
         for segment_code in self.segment_codes:          
             # Unpack the tuple
-            b_idx, g_idx, e_idx = segment_code  # if your codes are (b, g, e)
+            b_idx, g_idx, e_idx = segment_code
             for car in self.cars_on_sale:
                 if (car.transportType == 2) or (e_idx == 1 and car.transportType == 3):
                     car.car_utility_segments_U[segment_code] = self.U_segments_init#SET AS FIXED CONSTANT TO START FIRST TURN
@@ -226,7 +223,7 @@ class Firm:
         if not car_list:
             return None
 
-        # Check if car objects have the necessary attributes (you might want to add more checks)
+        # Check if car objects have the necessary attributes
         required_attributes = ["emissions", "ProdCost_t", "transportType", "delta", "Quality_a_t", "Eff_omega_a_t", "e_t", "fuel_cost_c", "cost_index", "emissions_index", "B"]
         for attr in required_attributes:
             if not hasattr(car_list[0], attr):
@@ -386,14 +383,13 @@ class Firm:
         Perform innovation step for the firm.
         Evaluate neighboring technologies and select a new car to add to memory.
 
-        ICE research ban (self.ice_research_ban_active, set from
-        controller.ICE_research_ban_time -- see next_step()): once active, no
-        new ICE neighbouring technologies are generated at all (the firm never
-        considers improving its ICE line further), and the candidate list is
-        also defensively filtered afterwards in case an ICE car slipped in
-        through last_researched_car_ICE. Requires ev_research_bool to already
-        be True (validated in controller._unpack_ice_research_ban_parameters)
-        so the EV branch below always leaves at least one candidate.
+        While self.ice_research_ban_active (set from
+        controller.ICE_research_ban_time, see next_step()), no ICE neighbouring
+        technologies are generated, and the candidate list is filtered again
+        afterwards in case one slipped in via last_researched_car_ICE.
+        ev_research_bool must be True by then, validated in
+        controller._unpack_ice_research_ban_parameters, so the EV branch below
+        always leaves at least one candidate.
         """
         # create a list of cars in neighbouring memory space
         if self.ice_research_ban_active:
@@ -919,13 +915,11 @@ class Firm:
         """
         Main method to choose which cars will be sold based on profitability and utility.
 
-        ICE sales ban (self.ice_sales_ban_active, set from
-        controller.ICE_sales_ban_time -- see next_step()): once active, ICE
-        cars are removed from the candidate pool before profitability/utility
-        are even computed, so a firm can never pick one to sell again.
-        Requires ev_production_bool to already be True (validated in
-        controller._unpack_ice_sales_ban_parameters) so the EV branch below
-        always leaves at least one candidate.
+        While self.ice_sales_ban_active (set from controller.ICE_sales_ban_time,
+        see next_step()), ICE cars are dropped from the candidate pool before
+        profitability and utility are computed. ev_production_bool must be True
+        by then, validated in controller._unpack_ice_sales_ban_parameters, so
+        the EV branch below always leaves at least one candidate.
 
         Returns:
             list: Selected cars to be offered on the market.
@@ -1015,17 +1009,13 @@ class Firm:
         """
         Advance the firm to the next time step. Updates cars, memory, and innovations.
 
-        ice_sales_ban_active/ice_research_ban_active are recomputed by
-        controller.py every step from ICE_sales_ban_time/ICE_research_ban_time
-        (see controller._unpack_ice_sales_ban_parameters/
-        _unpack_ice_research_ban_parameters) and simply latched onto this firm
-        -- see choose_cars_segments()/innovate() for where they take effect.
-        The moment the sales ban switches on, any ICE car still sitting in
-        cars_on_sale from a prior (pre-ban) period is flushed immediately
-        (rather than lingering until the next probabilistic
-        prob_change_production roll), and choose_cars_segments() is forced to
-        re-run right away so the firm doesn't limp along on a stale/thin
-        leftover EV lineup in the meantime.
+        ice_sales_ban_active/ice_research_ban_active come from controller.py,
+        which recomputes them each step; they are latched onto the firm here and
+        act in choose_cars_segments()/innovate(). On the step the sales ban
+        switches on, ICE cars left in cars_on_sale are flushed at once instead
+        of waiting for the next prob_change_production roll, and
+        choose_cars_segments() re-runs immediately so the firm is not left
+        selling a thin leftover EV lineup.
 
         Returns:
             list: Cars on sale after production and innovation decisions.

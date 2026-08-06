@@ -57,10 +57,8 @@ def plot_single_ev_prop(folder, real_data, dpi=200):
                          mean_data - ci_range, mean_data + ci_range,
                          color=colors[i], alpha=0.2)
 
-    # 3. Handle Real-World Data (Optional: Adjusting to match date axis)
-    # If real_data starts at a different date, you'll need to create a specific 
-    # date range for it. Assuming it aligns with the calibration logic:
-    # (Leaving this as standard steps or you can convert time_steps_real to dates too)
+    # 3. Real-world data is left on standard timesteps; it would need its own
+    # date range here if it did not align with the calibration start.
 
     # Formatting
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
@@ -81,7 +79,6 @@ def plot_single_ev_prop(folder, real_data, dpi=200):
     plt.show()
 
 def main():
-    # Update this path to your specific results folder
     target_folder = "results/sen_vary_max_num_cars_prop_00_13_31__17_04_2026"
     
     real_data = load_object("package/calibration_data", "calibration_data_output")["EV Prop"]

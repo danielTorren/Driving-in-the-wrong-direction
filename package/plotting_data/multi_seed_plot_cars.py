@@ -14,7 +14,7 @@ def extract_car_attributes_from_objects(cars_list, base_params):
     Extract price, range, efficiency, and type from car objects.
     Removes duplicates by tracking unique_id.
 
-    Units: the model does ALL fuel accounting in kWh, not litres -- gas prices
+    Units: the model does all fuel accounting in kWh, not litres. Gas prices
     and gasoline emissions are converted to a per-kWh basis in
     calibration_data_inputs.py at 33.41 kWh per US gallon (AFDC gallon
     equivalent). So ICE efficiency is km/kWh and fuel_tank is kWh, exactly like
@@ -199,7 +199,7 @@ def plot_multi_seed_2d_contour(fileName, outputs, base_params, dpi=300,
     density, so the two populations can be compared against their real-world
     counterparts separately.
 
-    Note this is a SNAPSHOT of the final time step, not a time series -- see
+    Note this is a SNAPSHOT of the final time step, not a time series. See
     generate_multi_seed_cars in package/resources/run.py.
     """
 

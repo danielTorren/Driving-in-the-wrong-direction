@@ -46,13 +46,11 @@ def run_single_simulation(theta, base_params, param_list):
     """
 
     #print("theta", theta)
-    # Work on a copy: writing theta straight into the caller's dict leaks back
-    # into the parent process whenever joblib runs in-process (num_workers == 1),
-    # leaving the last-evaluated theta -- and the whole calibration_data payload
-    # that generate_data() attaches -- baked into what main() later pickles as
-    # "base_params". At num_workers > 1 each task gets a pickled copy so the
-    # parent happened to stay clean, i.e. the bug was invisible on the cluster
-    # and only showed up on a single-core run.
+    # Work on a copy. Writing theta into the caller's dict leaks back into the
+    # parent process when joblib runs in-process (num_workers == 1), baking the
+    # last-evaluated theta and generate_data()'s calibration_data payload into
+    # what main() pickles as "base_params". With num_workers > 1 each task gets
+    # a pickled copy, so only single-core runs are affected.
     params = deepcopy(base_params)
 
     # Update the parameters from theta
@@ -83,10 +81,9 @@ def main(
     with open(BASE_PARAMS_LOAD) as f:
         base_params = json.load(f)
 
-    # Snapshot before the seed loop starts overwriting base_params["seed"] --
-    # this is what gets saved, so base_params.pkl reflects the configuration
-    # the run was launched with rather than whatever the last seed happened
-    # to be (previously it always read seed = seed_repetitions).
+    # Snapshot before the seed loop starts overwriting base_params["seed"], so
+    # the saved base_params.pkl records the configuration the run was launched
+    # with rather than the last seed used.
     base_params_save = deepcopy(base_params)
 
     total_runs = num_rounds*num_simulations* base_params["seed_repetitions"]
@@ -126,8 +123,8 @@ def main(
     for i in range(num_rounds):
         print("ROUND: ", i+1, "/", num_rounds)
 
-        # For each round, we run multiple seeds and collect the results. These
-        # are appended to `inference` ONCE, after the seed loop -- see below.
+        # Collect results across seeds, appended to `inference` once after the
+        # seed loop - see below.
         theta_all, x_all = [], []
 
         for seed in seeds:
@@ -142,12 +139,11 @@ def main(
             sim_for_seed = process_simulator(seeded_simulator, prior, is_numpy_simulator=prior_returns_numpy)
             check_sbi_inputs(sim_for_seed, prior)
 
-            # Run simulations for this seed.
-            # `seed` here pins sbi's OWN randomness (the theta draw from the
-            # proposal, and the per-batch seeds it hands its workers) -- it is
-            # unrelated to base_params["seed"], which is what actually drives
-            # the ABM. It must differ per call: passing one value to every
-            # iteration would make all 64 seed-batches draw IDENTICAL thetas.
+            # Run simulations for this seed. The `seed` argument pins sbi's own
+            # randomness - the theta draw from the proposal and the per-batch
+            # worker seeds - and is unrelated to base_params["seed"], which
+            # drives the ABM. It must differ per call, or every seed-batch draws
+            # identical thetas.
             theta, x = simulate_for_sbi(
                 sim_for_seed,
                 proposal,
@@ -160,16 +156,14 @@ def main(
             theta_all.append(theta)
             x_all.append(x)
 
-        # Append ONCE per round, not once per seed. sbi stamps every
-        # append_simulations() call that carries a non-prior proposal with
-        # max(_data_round_index) + 1, so appending inside the seed loop made it
-        # believe it was on round 64 after round 2 and round 128 after round 3.
-        # All seed-batches in a round were drawn from the SAME proposal, so they
-        # genuinely are one round; concatenating keeps _data_round_index at
-        # [0, 1, 2]. Training is unchanged (same atomic-loss path, same
-        # start_idx, same _proposal_roundwise[-1]) -- this just stops
-        # discard_prior_samples / non-atomic MDN losses, which branch on
-        # self._round, from silently misbehaving if they are ever switched on.
+        # Append once per round, not once per seed. sbi stamps every
+        # append_simulations() call carrying a non-prior proposal with
+        # max(_data_round_index) + 1, so appending inside the seed loop would
+        # make it count one round per seed. All seed-batches in a round come
+        # from the same proposal and genuinely are one round, so concatenating
+        # keeps _data_round_index at [0, 1, 2]. This matters for
+        # discard_prior_samples and the non-atomic MDN losses, which branch on
+        # self._round.
         inference.append_simulations(
             torch.cat(theta_all), torch.cat(x_all), proposal=proposal
         )

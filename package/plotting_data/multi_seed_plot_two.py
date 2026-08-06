@@ -440,7 +440,7 @@ def plot_comparison_extra(base_params1, base_params2, fileName1, fileName2, outp
 def main():
     # Hardcode the two file names
     fileName1 = "results/multi_seed_19_48_57__29_04_2026"  # First run
-    fileName2 = "results/multi_seed_18_49_55__29_04_2026"  # Second run (change this to your second file)
+    fileName2 = "results/multi_seed_18_49_55__29_04_2026"  # Second run
     
     # Set labels for the runs
     label1 = "Production Subsidy, $20000"

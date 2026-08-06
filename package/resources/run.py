@@ -73,12 +73,9 @@ def load_in_controller(controller_load, base_params_future):
 
     controller_load.setup_continued_run_future(base_params_future)
     #### RUN TIME STEPS
-    # Matches generate_data()'s own loop convention (< time_steps_max, not
-    # time_steps_max - 1) -- the "-1" here previously simulated the future
-    # period one month short of the requested duration_future every time
-    # (calibration itself, via generate_data, has always ended exactly at
-    # t_controller == duration_burn_in + duration_calibration, so this loop
-    # needs to add exactly duration_future MORE steps, not duration_future - 1).
+    # Same convention as generate_data(): calibration ends at t_controller ==
+    # duration_burn_in + duration_calibration, so this adds duration_future
+    # steps on top.
     while controller_load.t_controller < base_params_future["time_steps_max"]:
         controller_load.next_step()
 

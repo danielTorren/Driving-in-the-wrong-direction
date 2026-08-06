@@ -27,7 +27,7 @@ def plot_distance(data_array, property_list, fileName, name_property, property_s
     num_seeds = data_array.shape[1]
     time_steps = data_array.shape[2]
 
-    # Create time series array if you don't have one
+    # Plot against raw timesteps
     time_series = np.arange(time_steps)
 
     fig, axes = plt.subplots(nrows=1, ncols=num_deltas, figsize=(5 * num_deltas, 5), sharey=True)
@@ -205,7 +205,7 @@ def plot_age(data_array, property_list, fileName, name_property, property_save, 
     num_seeds = data_array.shape[1]
     time_steps = data_array.shape[2]
 
-    # Create time series array if you don't have one
+    # Plot against raw timesteps
     time_series = np.arange(time_steps)
 
     fig, axes = plt.subplots(nrows=1, ncols=num_deltas, figsize=(5 * num_deltas, 5), sharey=True)
@@ -264,7 +264,7 @@ def plot_emissions(data_array, property_list, fileName, name_property, property_
     num_seeds = data_array.shape[1]
     time_steps = data_array.shape[2]
 
-    # Create time series array if you don't have one
+    # Plot against raw timesteps
     time_series = np.arange(time_steps)
 
     fig, axes = plt.subplots(nrows=1, ncols=num_deltas, figsize=(5 * num_deltas, 5), sharey=True)
@@ -306,7 +306,7 @@ def plot_price(base_params, data_array, property_list, fileName, name_property, 
     num_seeds = data_array.shape[1]
     time_steps = data_array.shape[2]
 
-    # Create time series array if you don't have one
+    # Plot against raw timesteps
     time_series = np.arange(time_steps)
 
     # Create subplots with 2 rows per delta
@@ -382,7 +382,7 @@ def plot_efficiency(data_array, property_list, fileName, name_property, property
     num_seeds = data_array.shape[1]
     time_steps = data_array.shape[2]
 
-    # Create time series array if you don't have one
+    # Plot against raw timesteps
     time_series = np.arange(time_steps)
 
     fig, axes = plt.subplots(nrows=1, ncols=num_deltas, figsize=(5 * num_deltas, 5), sharey=True)

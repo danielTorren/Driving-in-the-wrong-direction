@@ -38,7 +38,7 @@ def produce_nested_param_list(base_params, var_phys, var_policy):
             prop = var_phys["property_varied"]
             current_params[sub][prop] = val_phys
                 
-            # 2. Update Policy Variable using your new function
+            # 2. Update Policy Variable
             current_params = update_policy_intensity(
                 current_params, 
                 var_policy["property_varied"], 
@@ -77,7 +77,7 @@ def run_cross_variation(BASE_PARAMS_LOAD, VAR_PHYSICAL_LOAD, VAR_POLICY_LOAD):
     print(f"\nSeed repetitions: {seed_reps}")
     print("-"*60)
 
-    # --- Policy runs (unchanged) ---
+    # --- Policy runs ---
     params_list = produce_nested_param_list(base_params, var_phys, var_pol)
     
     # Calculate and print total runs for policy runs

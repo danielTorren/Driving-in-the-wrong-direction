@@ -1016,7 +1016,7 @@ def emissions_decomposed_flow(base_params, social_network, time_series, fileName
     ax.xaxis.set_major_locator(mdates.YearLocator(5)) # Tick every 5 years
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y')) # Show only the year
     
-    # Refine Labels (No title as per your previous preference)
+    # Axis labels only, no title
     ax.set_xlabel("Year")
     ax.set_ylabel("Emissions Flow (Mt CO2)")
     ax.legend(loc='upper left')
@@ -1365,8 +1365,6 @@ def plot_scrapped_emissions_distribution(merchant, fileName, dpi=300):
             edgecolor='black'
         )
 
-    # Apply your standard formatting
-    # Note: Ensure these helper functions are available in your scope
     title_suffix = f" (n_ice={len(ice_emissions)}, n_ev={len(ev_emissions)})"
     
     format_plot(
@@ -1377,7 +1375,6 @@ def plot_scrapped_emissions_distribution(merchant, fileName, dpi=300):
         legend=True
     )
 
-    # Use your existing saving utility
     save_and_show(fig, fileName, "removed_vehicles_emissions", dpi)
 
 
@@ -1386,21 +1383,19 @@ def plot_scrapped_emissions_distribution(merchant, fileName, dpi=300):
 def info_real_cars():
     """
     Vehicle attribute validation plot.
-    
+
     Compares simulated cars on sale at a given time step against real-world
     2025-2026 US BEV and ICEV reference vehicles on a (Driving Range, Price) scatter.
-    
-    Drop this function into single_experiment_plot.py and call it from main().
-    
-    Unit conventions assumed (must match your model internals):
+
+    Unit conventions:
     - Efficiency:   EV  → km / kWh     ICE → km / L
     - Battery size: kWh
     - Fuel tank:    L   (passed via base_params["parameters_ICE"]["fuel_tank"])
     - Price:        USD (car.price)
     - Range:        km  (computed here, then converted to miles for display)
-    
+
     Real-world table (2025-2026 market data):
-    
+
     BEVs:
     Tesla Model 3 Long Range RWD        – $42,490 | 363 miles
     Chevrolet Equinox EV LT             – $34,995 | 319 miles

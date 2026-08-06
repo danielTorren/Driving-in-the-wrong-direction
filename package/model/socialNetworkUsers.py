@@ -71,15 +71,12 @@ class Social_Network:
         self.emissions_flow = 0
         self.utility_cumulative = 0
 
-        # Always-on (unlike users_utility_vec/history_utility_individual, which are
-        # gated behind save_timeseries_data_state): one (num_individuals,) array per
-        # timestep, raw utility for every agent (switchers + non-switchers), whole
-        # simulation. Reset to [] at the start of the future/policy period in
-        # controller.setup_continued_run_future(), same as utility_cumulative is
-        # reset to 0 there. Feeds the BAU-relative log-utility surrogate metric
-        # (see sampling.compute_log_utility_metric) — entirely independent of the
-        # existing prep_counters()/users_utility_vec instrumentation, so it changes
-        # no existing behaviour.
+        # One (num_individuals,) array per timestep of raw utility for every agent,
+        # switchers and non-switchers, over the whole simulation. Recorded
+        # unconditionally, unlike users_utility_vec/history_utility_individual which
+        # are gated behind save_timeseries_data_state. Reset to [] at the start of
+        # the future/policy period in controller.setup_continued_run_future(),
+        # alongside utility_cumulative.
         self.history_utility_individual_always = []
 
         self.init_network_settings(parameters_social_network)
@@ -91,7 +88,7 @@ class Social_Network:
         self.r = parameters_vehicle_user["r"]
         self.kappa = parameters_vehicle_user["kappa"]
 
-        # Backward compatible: absent => naive/permanent expectations (old behaviour).
+        # Absent => naive/permanent expectations.
         self.forward_looking_expectations = parameters_social_network.get("forward_looking_expectations", False)
 
         # Generate a list of indices and shuffle them
@@ -333,11 +330,9 @@ class Social_Network:
             index_current_cars_start = len(self.new_cars)
 
         #NON-SWTICHERS
-        # full_CV_utility_vec is now computed unconditionally (previously only
-        # under save_timeseries_data_state) — it feeds the always-on
-        # history_utility_individual_always buffer below. prep_counters() itself
-        # stays gated exactly as before; it only resets state used by the
-        # optional full history tracking, which this doesn't touch.
+        # full_CV_utility_vec is needed unconditionally, as it feeds
+        # history_utility_individual_always below. prep_counters() stays gated:
+        # it only resets state used by the optional full history tracking.
         __, full_CV_utility_vec = self.generate_utilities_current(CV_vehicle_dict_vecs, self.beta_vec, self.gamma_vec, self.d_vec, self.nu_vec)
         if self.save_timeseries_data_state and (self.t_social_network % self.compression_factor_state == 0):
             self.prep_counters()
@@ -693,26 +688,21 @@ class Social_Network:
         Present-value lifecycle fuel/emissions cost term (the d_vec-weighted
         term subtracted in the utility formulas below).
 
-        forward_looking_expectations off: reproduces the paper's naive/
-        permanent-policy closed form exactly (Appendix A.4) — bit-for-bit,
-        since it's the same expression, just parameterised by age_factor.
+        forward_looking_expectations off: the paper's naive/permanent-policy
+        closed form (Appendix A.4), parameterised by age_factor.
 
-        forward_looking_expectations on: uses the forward-looking discounted
-        present-value indices (cost_index, emissions_index) computed once per
-        timestep in controller.compute_discounted_indices() over the actual
-        known future price/policy path, instead of assuming today's level
-        persists forever. cost_index and emissions_index are kept separate
-        (rather than combined like fuel_cost_c + gamma*e_t) because gamma is
-        agent-heterogeneous and must be applied outside the discounted sum.
+        forward_looking_expectations on: uses the discounted present-value
+        indices (cost_index, emissions_index) computed per timestep in
+        controller.compute_discounted_indices() over the known future
+        price/policy path. The two indices are kept separate rather than
+        combined as fuel_cost_c + gamma*e_t, because gamma is agent-specific
+        and must be applied outside the discounted sum.
 
-        The result is clipped at MAX_LIFECYCLE_COST_TERM: with a large ICE
-        driving-ban penalty (see controller._unpack_ice_driving_ban_parameters)
-        and a tail-end gamma_i (emissions willingness-to-pay) draw, this term
-        can otherwise reach magnitudes far beyond anything a realistic
-        fuel/carbon cost would ever produce, which previously led to a rare
-        but real crash further down the choice pipeline. The clip is set far
-        above any value the pre-existing (no-ban) model could ever legitimately
-        produce, so it is a no-op for every scenario except this one.
+        Clipped at MAX_LIFECYCLE_COST_TERM as a guard: a large ICE driving-ban
+        penalty combined with a tail-end gamma_i draw can otherwise push this
+        term to magnitudes that break the choice pipeline downstream. The
+        threshold sits well above anything a realistic fuel/carbon cost
+        reaches.
         """
         delta = vehicle_dict_vecs["delta"]
         Eff = vehicle_dict_vecs["Eff_omega_a_t"]

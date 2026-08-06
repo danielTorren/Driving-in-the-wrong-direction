@@ -58,8 +58,8 @@ def main(
 
     data_array_ev = data_flat_ev.reshape(num_scenarios, seed_repetitions, time_steps)
     
-    # Prices often have extra dimensions (e.g., matrix of price points), 
-    # adjust the reshape based on your specific model output (currently 2x2 placeholder)
+    # Prices may carry an extra dimension (e.g. a matrix of price points), so
+    # fall back to the flat shape if the trailing axis isn't there.
     try:
         data_array_price = data_flat_prices.reshape(num_scenarios, seed_repetitions, time_steps, -1)
     except ValueError:
