@@ -14,7 +14,17 @@ from package.model.socialNetworkUsers import Social_Network
 import numpy as np
 import itertools
 from scipy.stats import lognorm
+# Aliased rather than imported as `beta` because `beta` is already a user
+# parameter name in this model (gen_beta, beta_list, parameters_social_network
+# ["beta"]) and the two are unrelated. Used by gen_chi's inverse-CDF draw.
+from scipy.stats import beta as beta_dist
 from copy import deepcopy
+
+# Offset used to derive a dedicated substream for initial-condition draws (fleet
+# ages, firm placement) from `seed`. Kept separate from self.random_state so that
+# switching the new initialisation on does not consume draws from -- and thereby
+# shift -- the stream every other component shares.
+INIT_SEED_OFFSET = 100000
 
 class Controller:
     """
@@ -34,9 +44,13 @@ class Controller:
 
         self.unpack_controller_parameters(parameters_controller)
         
-        self.parameters_EV["delta"] = self.parameters_ICE["delta"] 
-        self.parameters_EV["min_Quality"] = self.parameters_ICE["min_Quality"] 
+        self.parameters_EV["delta"] = self.parameters_ICE["delta"]
+        self.parameters_EV["min_Quality"] = self.parameters_ICE["min_Quality"]
         self.parameters_EV["max_Quality"] = self.parameters_ICE["max_Quality"]
+        # Quality is compared ACROSS drivetrains in the choice utility, so the two
+        # landscapes must share the whole quality mapping, not just its bounds.
+        # See the stretch_vec comment in nkModel_ICE.
+        self.parameters_EV["stretch_Quality"] = self.parameters_ICE.get("stretch_Quality", 1.0)
 
         self.handle_seed()
 
@@ -126,8 +140,9 @@ class Controller:
         self.save_timeseries_data_state = parameters_controller["save_timeseries_data_state"]
         self.compression_factor_state = parameters_controller["compression_factor_state"]
 
-        # Absent => naive/permanent expectations. See compute_discounted_indices()
-        # and the utility formulas in socialNetworkUsers.py / firm.py.
+        # Backward compatible: absent in existing base_params_*.json => naive/permanent
+        # expectations, identical to current behaviour. See socialNetworkUsers.py /
+        # firm.py utility formulas and compute_discounted_indices() below.
         self.forward_looking_expectations = parameters_controller.get("forward_looking_expectations", False)
         self.parameters_social_network["forward_looking_expectations"] = self.forward_looking_expectations
         self.parameters_firm["forward_looking_expectations"] = self.forward_looking_expectations
@@ -156,38 +171,57 @@ class Controller:
         self.time_steps_max = parameters_controller["time_steps_max"]
 
         #############################################################################################################################
-        #DEAL WITH ICE DRIVING BAN (optional, absent => never banned)
+        #DEAL WITH ICE DRIVING BAN (optional, backward compatible: absent => never banned)
         self._unpack_ice_driving_ban_parameters()
 
         #############################################################################################################################
-        #DEAL WITH ICE SALES BAN AND ICE RESEARCH BAN (optional, absent => never banned)
+        #DEAL WITH ICE SALES BAN AND ICE RESEARCH BAN (optional, backward compatible: absent => never banned)
         self._unpack_ice_sales_ban_parameters()
         self._unpack_ice_research_ban_parameters()
 
     def _unpack_ice_driving_ban_parameters(self):
         """
-        ICE driving ban: a cost shock rather than a hard switch.
-        ICE_driving_ban_penalty is added to the effective per-unit ICE fuel
-        cost from ICE_driving_ban_time onward, on top of the prevailing
-        gas/carbon-price cost.
+        ICE_driving_ban_time (months after burn-in ends, i.e. same convention
+        as ev_research_start_time/ev_production_start_time above) is the
+        absolute controller timestep from which driving an ICE car becomes
+        prohibitively costly (see compute_discounted_indices() and the
+        gas_price assignment in update_time_series_data()). None (the
+        default) means no ban, identical to current behaviour.
 
-        ICE_driving_ban_time is given in months after burn-in ends (same
-        convention as ev_research_start_time/ev_production_start_time); None
-        means no ban.
+        Unlike a hard "no more ICE sales" switch, this is implemented as a
+        cost shock: ICE_driving_ban_penalty is added to the effective
+        per-unit ICE fuel cost for every month from ICE_driving_ban_time
+        onward, on top of whatever gas/carbon-price cost already applied.
+        It is fed into the exact same gas-price path that both naive AND
+        forward-looking agents already read (naive agents read only today's
+        value; forward-looking agents discount the whole known future path,
+        see compute_discounted_indices()). This is deliberate:
+          - naive firms/consumers only notice the shock once it actually
+            arrives (t >= ICE_driving_ban_time), and switch away from ICE at
+            that point via the ordinary utility-driven choice mechanism —
+            no new decision rule is needed for this, it already exists.
+          - forward-looking firms/consumers see the shock arriving in
+            advance through the same discounted present-value index used for
+            the carbon price (Section on forward-looking expectations), so
+            their valuation of ICE erodes gradually as the ban approaches,
+            over a horizon governed by the model's own discount rate r and
+            depreciation rate delta -- NOT by any separately-chosen
+            "anticipation lead" parameter. Firms in particular need no
+            ICE-specific code at all here: as consumer demand for ICE erodes,
+            expected profit from researching/producing ICE erodes with it,
+            and the existing profit-maximising choose_cars_segments()/
+            innovate() logic naturally shifts toward EV on its own.
 
-        The penalty enters the gas-price path read by both agent types, so
-        naive agents feel it only once it arrives while forward-looking
-        agents see it discounted in advance (see compute_discounted_indices).
-        Both then switch away from ICE through the existing utility-driven
-        choice and profit-maximising production logic, so no ICE-specific
-        decision rule is needed. Acting through fuel cost also reaches
-        second-hand ICE cars, since secondHandMerchant.py refreshes
-        car.fuel_cost_c from self.gas_price every step, which is appropriate
-        for a driving ban: it applies to every ICE car on the road.
+        Because this acts through the fuel-cost channel, it also reaches
+        second-hand ICE cars (secondHandMerchant.py already refreshes
+        car.fuel_cost_c from the same self.gas_price every step) -- correct
+        for a driving ban, which (unlike a sale ban) applies to every ICE
+        car on the road regardless of when or from whom it was bought.
 
-        Called from unpack_controller_parameters() and from
-        setup_continued_run_future(), where a reused calibration may be given
-        a different ICE_driving_ban_time per scenario.
+        Called from both unpack_controller_parameters() (fresh run) and
+        setup_continued_run_future() (calibration-reuse: a deepcopied,
+        already-calibrated controller gets a NEW future-period policy config,
+        which may set a different ICE_driving_ban_time per scenario).
         """
         self.ICE_driving_ban_time = None
         if self.parameters_controller.get("ICE_driving_ban_time") is not None:
@@ -198,17 +232,24 @@ class Controller:
 
     def _unpack_ice_sales_ban_parameters(self):
         """
-        ICE sales ban: from ICE_sales_ban_time onward no firm may offer a NEW
-        ICE car for sale. Months after burn-in ends; None means no ban.
+        ICE_sales_ban_time (same "months after burn-in ends" convention as
+        ICE_driving_ban_time/ev_production_start_time above) is the absolute
+        controller timestep from which no firm may offer a NEW ICE car for
+        sale any more. None (the default) means no ban.
 
-        A hard constraint on firms' choice sets rather than a cost shock.
-        firm.choose_cars_segments() drops ICE from its candidate pool, and
-        firm.next_step() flushes any ICE car left in cars_on_sale from before
-        the ban. Already-sold ICE cars are untouched: they stay drivable and
-        resellable, which is what separates a sales ban from a driving ban.
+        Unlike the ICE driving ban, this is a hard structural constraint on
+        firms' own choice sets, not a cost shock: from ICE_sales_ban_time
+        onward, firm.choose_cars_segments() drops ICE cars from its candidate
+        pool before any profit/utility calculation, and firm.next_step()
+        immediately flushes any ICE car still sitting in cars_on_sale from a
+        pre-ban period rather than waiting on the ordinary probabilistic
+        prob_change_production roll. It deliberately does NOT touch already
+        -sold ICE cars: they remain drivable and resellable on the
+        second-hand market exactly as before (that's what distinguishes a
+        sales ban from a driving ban).
 
-        Requires EV production to be running by the time the ban bites,
-        otherwise a firm has nothing to sell.
+        Requires EV production to already be running by the time the ban
+        bites, otherwise a firm would be left with nothing to sell.
         """
         self.ICE_sales_ban_time = None
         if self.parameters_controller.get("ICE_sales_ban_time") is not None:
@@ -218,19 +259,22 @@ class Controller:
 
     def _unpack_ice_research_ban_parameters(self):
         """
-        ICE research ban: from ICE_research_ban_time onward firms may not
-        research or improve ICE technology. Months after burn-in ends; None
-        means no ban.
+        ICE_research_ban_time (same convention as ICE_sales_ban_time above)
+        is the absolute controller timestep from which firms may no longer
+        research/improve ICE technology at all. None (the default) means no
+        ban.
 
-        Independent of the sales ban. It only stops firm.innovate() from
-        generating new ICE neighbouring technologies (see
-        firm.ice_research_ban_active); ICE models already in a firm's memory
-        (list_technology_memory_ICE) remain sellable unless ICE_sales_ban_time
-        also applies. The two bans can therefore be combined in any
-        arrangement rather than only together.
+        Independent of the sales ban: this only stops firm.innovate() from
+        generating/selecting new ICE neighbouring technologies (see
+        firm.ice_research_ban_active) -- it does NOT remove ICE models
+        already in a firm's memory (list_technology_memory_ICE), so a firm
+        can still SELL previously-researched ICE cars until/unless
+        ICE_sales_ban_time also kicks in. This is what lets the two bans be
+        combined additively (research ban alone; research+sales; research
+        +sales+driving) rather than only ever together.
 
-        Requires EV research to be running by the time the ban bites,
-        otherwise a firm has nothing to research.
+        Requires EV research to already be running by the time the ban
+        bites, otherwise a firm would be left with nothing to research.
         """
         self.ICE_research_ban_time = None
         if self.parameters_controller.get("ICE_research_ban_time") is not None:
@@ -255,6 +299,14 @@ class Controller:
         self.parameters_social_network["random_state"] = self.random_state
         self.parameters_firm["random_state"] = self.random_state
         self.parameters_second_hand["random_state"] = self.random_state
+
+        #Initial conditions get their own substream off `seed`, so that the fleet
+        #age draw and the firm placement draw vary across replicates (the NK
+        #landscape stays pinned to seed_inputs) without shifting self.random_state.
+        self.random_state_init = np.random.RandomState(
+            self.parameters_controller["seed"] + INIT_SEED_OFFSET
+        )
+        self.parameters_firm_manager["random_state_init"] = self.random_state_init
 
     def gen_users_parameters(self):
         """
@@ -288,11 +340,15 @@ class Controller:
         #BETA
         self.gen_beta()
 
-        self.parameters_social_network["beta_vec"] = self.beta_vec 
-        self.parameters_social_network["gamma_vec"] = self.gamma_vec 
-        self.parameters_social_network["chi_vec"] = self.chi_vec 
-        self.parameters_social_network["nu_vec"] = self.nu_vec 
+        self.parameters_social_network["beta_vec"] = self.beta_vec
+        self.parameters_social_network["gamma_vec"] = self.gamma_vec
+        self.parameters_social_network["chi_vec"] = self.chi_vec
+        self.parameters_social_network["nu_vec"] = self.nu_vec
         self.parameters_social_network["d_vec"] = self.d_vec
+        # Aligned with beta_vec agent-for-agent (see gen_beta). Used only for
+        # reporting distributional outcomes by income decile; nothing in the
+        # choice or pricing logic reads it, so it changes no model behaviour.
+        self.parameters_social_network["income_vec"] = self.income_vec
 
         self.beta_median = np.median(self.beta_vec)
         self.gamma_median = np.median(self.gamma_vec)
@@ -353,10 +409,51 @@ class Controller:
         self.a_chi = self.parameters_social_network["a_chi"]
         self.b_chi = self.parameters_social_network["b_chi"]
         self.chi_max = self.parameters_social_network["chi_max"]
-        self.proportion_zero_target = self.parameters_social_network["proportion_zero_target"]
+        self.proportion_zero_target = self.parameters_social_network["proportion_zero_target"]  # Define your target proportion here
 
-        # Step 1: Generate continuous Beta distribution
-        innovativeness_vec_continuous = self.random_state_inputs.beta(self.a_chi, self.b_chi, size=self.num_individuals)
+        # Step 1: Generate the continuous Beta distribution by inverse CDF.
+        #
+        # ppf consumes exactly num_individuals uniforms whatever (a_chi, b_chi)
+        # are. Do NOT replace this with random_state_inputs.beta(): that is a
+        # rejection sampler, so the number of words it consumes depends on
+        # (a_chi, b_chi), and every later draw off this same pinned stream --
+        # zero_indices below, WTP_E_vec in gen_gamma, incomes and the network
+        # permutation in gen_beta, then the firm placement and the ICE/EV NK
+        # landscapes -- shifts position whenever a_chi or b_chi moves, handing
+        # the run a different population and a different landscape. gen_chi is
+        # the ONLY draw on this stream whose arguments depend on a calibrated
+        # parameter, so these two lines cover the whole chain.
+        #
+        # Measured on the pinned seed_inputs=22 stream, at the calibrated b_chi.
+        # The rejection sampler consumed 27904 words of the stream at
+        # a_chi = 1.351 but 27884 at 1.40, so at 1.40 the whole setup ran off a
+        # different offset: the ICE landscape's worst design moved from
+        # 100100110010101 to 000000111011010, its production cost from $38.5M to
+        # $34.6M, the EV landscape moved with it, and mean income changed too.
+        # The shift is a step function of a_chi, not a smooth one -- 1.36
+        # consumed exactly as much as 1.351 and was bit-identical downstream --
+        # so which small moves are free is unpredictable. Agent-level chi was
+        # also re-randomised: corr(chi_i, chi_i before) fell to ~0 while the
+        # SORTED distribution stayed correlated above 0.99, i.e. the same
+        # distribution over different individuals, which re-wires who in the
+        # social network is innovative. On sbi_seed_av_22_25_54__16_08_2026 the
+        # leftover scatter at fixed theta was 0.75 in logit units against a
+        # seed-noise share of at most 0.31, and no number of seeds per theta
+        # could average it away because every seed shared the reshuffle. That is
+        # what SBI reads as "this parameter does not predict the output".
+        #
+        # Runs made with the rejection sampler cannot be reproduced from this
+        # file: everything before 13/08/2026 (e.g.
+        # calibration_gen_09_30_13__13_08_2026), the sbi_seed_av runs launched
+        # before 10:52 on 18/08/2026, and everything committed between cce52bd
+        # and this change. Their EV level is not comparable either, since at
+        # matched a_chi/b_chi/delta the 2023 EV stock differs by roughly an order
+        # of magnitude once the stream is realigned, because seed_inputs then
+        # draws a different landscape. Pick the landscape deliberately instead:
+        # package/generating_data/seed_inputs_sweep_gen.py scores seed_inputs
+        # against the calibration targets on THIS code path.
+        u = self.random_state_inputs.random_sample(self.num_individuals)
+        innovativeness_vec_continuous = beta_dist.ppf(u, self.a_chi, self.b_chi)
 
         # Step 2: Introduce zeros based on target proportion
         num_zeros = int(self.proportion_zero_target * self.num_individuals)
@@ -408,17 +505,66 @@ class Controller:
 
     def gen_beta(self):
         """
-        Generate beta_vec reflecting consumer quality sensitivity based on income.
-        Inverse relationship to income distribution drawn from a log-normal.
+        Generate beta_vec, the dollar willingness to pay for car quality, from
+        the income distribution drawn from a log-normal, as
+
+            beta_i/median_beta = income_i/median_income
+
+        so richer agents get the higher willingness to pay. This is what the
+        manuscript specifies (Section "Calibration": "we distribute this value
+        according to the Californian income distribution, assigning a higher
+        willingness to pay to richer agents"; Table of parameters: "greater beta
+        is richer car user"; supplementary: "in such a way that the same
+        proportion is maintained").
+
+        Do NOT reinstate the reciprocal form,
+        median_beta*(median_income/incomes). beta is the coefficient on
+        Quality**alpha in a money-metric utility whose price coefficient is
+        exactly 1 for every agent, so under the reciprocal the HIGHEST quality
+        willingness to pay goes to the POOREST agent, the income-decile series
+        built by socialNetworkUsers.init_income_deciles come out as the mirror of
+        the beta-based _top/_bottom ones, and any later income-correlated
+        parameter (nu, gamma, d) inherits the same inversion.
+
+        Which runs used which: everything before 10:49 on 13/08/2026 (e.g.
+        calibration_gen_09_30_13__13_08_2026) is reciprocal, as is everything on
+        min_param_changes from commit 2d2b335 up to this change; commit 2e552da
+        and the runs from 13/08/2026 14:36 onward (endog_single,
+        vary_single_policy_gen, endog_pair) are proportional.
+
+        The difference is bounded, unlike gen_chi's. The number of draws consumed
+        is identical either way, since the mapping is applied after lognorm.rvs,
+        so the pinned seed_inputs stream is not shifted and nothing downstream of
+        this method moves. Both forms also draw beta_vec from the SAME
+        distribution, because the reciprocal of a log-normal is log-normal with
+        the same sigma, so they are alternative samples from one unchanged law: at
+        num_individuals = 3000 and income_sigma = 0.927 the mean of beta_vec moves
+        by order 2%, plus a reshuffle of which individuals sit in the tail and of
+        the num_beta_segments quantile edges.
         """
         #BETA
         self.beta_multiplier = self.parameters_social_network.get("beta_multiplier", 1)#PURPOSE IS TO TEST THE ROLE OF BETA DISTRIBUTIONS
-        median_beta = self.calc_beta_median()*self.beta_multiplier 
-        #GIVEN THAT YOU DO MEDIAN INCOME/ INCOME, DONT NEED TO SCALE INCOME
+        median_beta = self.calc_beta_median()*self.beta_multiplier
+        #THE MAPPING IS A RATIO TO THE MEDIAN, SO DONT NEED TO SCALE INCOME
         incomes = lognorm.rvs(s=self.parameters_social_network["income_sigma"], scale=np.exp(self.parameters_social_network["income_mu"]), size=self.num_individuals, random_state=self.random_state_inputs)
         median_income = np.median(incomes)
-        self.beta_vec = median_beta*(median_income/incomes)
-        self.random_state_inputs.shuffle(self.beta_vec)# Shuffle to randomize the order of agents
+        beta_unshuffled = median_beta*(incomes/median_income)
+
+        # Shuffle to randomise the order of agents, i.e. to decorrelate beta
+        # from an agent's index and so from its position in the social network.
+        # Drawn as an explicit permutation rather than shuffling beta_vec in
+        # place so that the SAME permutation can be applied to incomes, leaving
+        # income_vec[i] as the income of the agent whose quality willingness to
+        # pay is beta_vec[i]. Without this the income draw is discarded and
+        # there is no agent-level income to report distributional outcomes on.
+        # RandomState.permutation(n) is arange(n) followed by the same
+        # Fisher-Yates pass that shuffle() performs, and a shuffle is a pure
+        # permutation of positions independent of the array's contents, so
+        # beta_vec is bit-for-bit what the in-place shuffle produced and the
+        # random stream is left in exactly the same state.
+        perm = self.random_state_inputs.permutation(self.num_individuals)
+        self.beta_vec = beta_unshuffled[perm]
+        self.income_vec = incomes[perm]
 
         self.num_beta_segments = self.parameters_firm_manager["num_beta_segments"]
         # Calculate the bin edges using quantiles
@@ -433,12 +579,17 @@ class Controller:
         """
         Generate a list of beta values for n agents based on quintile incomes.
         Beta for each quintile is calculated as:
-            beta = 1 * (lowest_quintile_income / quintile_income)
-        
+            beta = median_beta * (quintile_income / median_quintile_income)
+
+        Same mapping as gen_beta, so richer quintiles get the higher willingness
+        to pay -- see that method's docstring. Currently unused, but kept in step
+        with gen_beta so it cannot reintroduce the reciprocal if it is ever wired
+        up.
+
         Args:
             n (int): Total number of agents.
             quintile_incomes (list): List of incomes for each quintile (from lowest to highest).
-            
+
         Returns:
             list: A list of beta values of length n.
         """
@@ -446,7 +597,7 @@ class Controller:
 
         median_income = quintile_incomes[2]
 
-        beta_vals = [median_beta*median_income/income for income in quintile_incomes]
+        beta_vals = [median_beta*income/median_income for income in quintile_incomes]
         
         # Assign proportions for each quintile (evenly split 20% each)
         proportions = [0.2] * len(quintile_incomes)
@@ -723,39 +874,74 @@ class Controller:
     def compute_discounted_indices(self):
         """
         Precompute forward-looking present-value indices for fuel/electricity
-        cost and emissions intensity, read by the utility formulas in
-        socialNetworkUsers.py/firm.py when forward_looking_expectations is on.
+        cost and emissions intensity, used by socialNetworkUsers.py/firm.py's
+        utility formulas when forward_looking_expectations is enabled.
 
-        Where the naive closed-form geometric series (paper Appendix A.4)
-        assumes today's price/emissions level persists forever, these indices
-        discount the actual known future path, which the vectors built above
-        already cover for the whole horizon. Done once per step via backward
-        recursion rather than per agent:
+        Generalises the naive closed-form geometric series (paper Appendix A.4)
+        — which assumes the CURRENT price/emissions level persists forever —
+        to the ACTUAL known future path. That path is already fully computed
+        above (gas_price_california_vec / electricity_price_vec / etc. cover
+        the whole simulation horizon) but previously only ever read one
+        timestep at a time. Computed once here via backward recursion, not
+        per-agent, so it costs nothing extra per utility evaluation:
             Index(t) = z_t + q * Index(t+1)
-        With a constant z_t this unrolls to the naive closed form.
+        (unrolling this to infinity with a constant z_t reproduces the old
+        closed form exactly, so this is a strict generalisation.)
 
-        gas_cost_effective_vec also carries the ICE driving-ban penalty (see
-        _unpack_ice_driving_ban_parameters). It is read as self.gas_price
-        every step regardless of expectations, so naive agents see the shock
-        only on arrival while forward-looking agents see it smeared backward
-        by q per month, so the anticipation horizon follows from r and delta
-        rather than a separate parameter.
+        If forward_looking_expectations is False, these arrays are still
+        computed (cheap, done once) but the *_index_vec arrays are never read
+        by the utility formulas -- only gas_cost_effective_vec is (see
+        update_time_series_data(), which reads today's entry of it as
+        self.gas_price for every agent regardless of expectations), so
+        behaviour is unchanged from before this feature existed whenever
+        ICE_driving_ban_time is None.
 
-        Extending past the simulated horizon is handled per series, because
-        the carbon price is a temporary policy: calculate_price_at_time()
-        returns 0 once t passes duration_burn_in + duration_calibration +
-        absolute_2035. Since duration_future is typically absolute_2035, the
-        last simulated entry sits near the ramp's peak, so holding it flat
-        would have forward-looking agents treat a temporary tax as permanent
-        at its highest rate. The carbon-price component is therefore extended
-        through calculate_price_at_time(), while gas/electricity base prices,
-        the decarbonisation trend and any driving-ban penalty are held at
-        their last value, none of those having a coded end date.
+        gas_cost_effective_vec ALSO carries the ICE driving-ban cost shock
+        (see _unpack_ice_driving_ban_parameters()): from
+        ICE_driving_ban_time onward, ICE_driving_ban_penalty is added on top
+        of the ordinary gas+carbon-price cost, for every month up to the end
+        of the horizon. Naive agents only see this once t reaches
+        ICE_driving_ban_time (they read gas_cost_effective_vec one month at a
+        time); forward-looking agents see it earlier, smeared backward
+        through the discounted sum by exactly q per month -- i.e. the
+        anticipation horizon is whatever the model's own r/delta already
+        imply, not a separately chosen parameter.
 
-        The extension also runs long enough to reach ICE_driving_ban_time when
-        that falls beyond the horizon (e.g. a 2050 ban on a run ending in
-        2030), so the ban still discounts back into the visible period. The
-        stored arrays are sliced back to the real horizon length.
+        THE CARBON PRICE IS A TEMPORARY POLICY, NOT A PERMANENT ONE. Naively
+        extrapolating the recursion's own perpetuity boundary
+        (Index(last) = values[last]/(1-q), i.e. "whatever the last known
+        value is, holds forever") would be WRONG for carbon price
+        specifically: calculate_price_at_time() already returns 0 once t
+        passes the policy period (duration_burn_in + duration_calibration +
+        absolute_2035) -- the ramp is explicitly coded to END, not to persist
+        at its final/peak value. Since duration_future is typically set
+        equal to absolute_2035, the simulated array's last entry is at (or
+        just short of) the ramp's PEAK, so a naive flat-hold boundary would
+        have a forward-looking agent believe a temporary carbon tax is a
+        PERMANENT one at its highest rate forever -- overstating how much a
+        rising carbon price should be anticipated. The fix below extends the
+        carbon-price component specifically using calculate_price_at_time()
+        (so it correctly drops back to 0 a month or two past the simulated
+        horizon), while gas/electricity BASE prices, the electricity
+        emissions-intensity (decarbonisation) trend, and an ICE driving-ban
+        penalty are extended by holding their last simulated value constant
+        -- those are not policies with a coded end date (manage_scenario()
+        itself holds gas/electricity prices flat once their own ramp
+        reaches its target; a driving ban has no reason to spontaneously
+        reverse), so a flat-hold extension for them is the correct
+        continuation, not an approximation.
+
+        If ICE_driving_ban_time falls BEYOND the simulated horizon (e.g. a
+        2050 ban configured on a run that only simulates to 2030), the
+        recursion is still made to see it: the extension above is made long
+        enough to reach ICE_driving_ban_time, so the eventual ban still
+        bleeds backward into the visible horizon by exactly the amount its
+        own discount factor implies, rather than having no effect at all
+        merely because it wasn't reached during this particular run. The
+        array actually stored/read during the simulation
+        (self.gas_cost_effective_vec, self.*_index_vec) is always sliced
+        back down to the real horizon length -- nothing beyond it is ever
+        read.
         """
         r = self.parameters_vehicle_user["r"]
         delta = self.parameters_ICE["delta"]  # identical for EV, see unpack_controller_parameters
@@ -764,9 +950,11 @@ class Controller:
         n = len(self.gas_price_california_vec)
         carbon_price_arr = np.asarray(self.carbon_price_time_series)[:n]
 
-        # Buffer long enough for calculate_price_at_time() to settle into its
-        # post-policy value of 0, extended further if a driving ban is
-        # configured beyond it.
+        # Always extend by a generous buffer -- comfortably enough for
+        # calculate_price_at_time() to reach (and settle into) its
+        # post-policy-period value of 0, a month or two past n given
+        # duration_future is typically set equal to absolute_2035 -- and
+        # extend further still if a driving ban is configured beyond that.
         CARBON_POLICY_EXTENSION_BUFFER = 240  # 20 years
         horizon = n + CARBON_POLICY_EXTENSION_BUFFER
         if self.ICE_driving_ban_time is not None:
@@ -785,18 +973,33 @@ class Controller:
         electricity_emissions_intensity_ext = np.full(horizon, self.electricity_emissions_intensity_vec[-1])
         electricity_emissions_intensity_ext[:n] = self.electricity_emissions_intensity_vec
 
-        # Reuse the computed array for t<n so it stays consistent with
-        # self.carbon_price/carbon_price_time_series, then use the exogenous
-        # formula for the extension so it reverts to 0 past the policy period.
+        # Carbon price: reuse the already-computed array for t<n (guarantees
+        # bit-for-bit consistency with self.carbon_price/carbon_price_time_series
+        # elsewhere), then call the real exogenous formula for the extension
+        # -- NOT a flat hold -- so it correctly reverts to 0 past the policy
+        # period instead of persisting at its ramped-up value.
         #
-        # calculate_price_at_time() is only safe once
-        # future_carbon_price_policy/_state/_init exist, which happens in
-        # manage_policies(). A calibration-only controller (duration_future
-        # == 0) never calls it, so hasattr() is the test. self.full_run_state
-        # would be stale, as setup_continued_run_future() never updates it.
-        # Calibration-only needs no special case: carbon_price_time_series is
-        # already all zeros there (see the full_run_state branch above), so
-        # holding that tail flat is correct.
+        # Carbon price: reuse the already-computed array for t<n (guarantees
+        # bit-for-bit consistency with self.carbon_price/carbon_price_time_series
+        # elsewhere), then call the real exogenous formula for the extension
+        # -- NOT a flat hold -- so it correctly reverts to 0 past the policy
+        # period instead of persisting at its ramped-up value.
+        #
+        # calculate_price_at_time() is only safe to call once
+        # future_carbon_price_policy/_state/_init exist, which happens only
+        # after manage_policies() has run. A calibration-only controller
+        # (Phase 1, duration_future == 0, e.g. the one built by
+        # analysis.endogenous_policy_intensity_single_gen.set_up_calibration_runs)
+        # never calls manage_policies() at all, so
+        # those attributes don't exist yet -- checking hasattr() directly
+        # (rather than self.full_run_state, which setup_continued_run_future()
+        # never updates and so would be stale False even once manage_policies()
+        # genuinely has run for that controller) is what actually tracks
+        # whether it's safe to call. Calibration-only needs no special
+        # handling anyway: carbon_price_time_series is already forced to all
+        # zeros there (see the full_run_state branch above), so a flat hold
+        # of that (still zero) tail is already exactly correct -- there is no
+        # policy to revert away from.
         carbon_price_ext = np.empty(horizon)
         carbon_price_ext[:n] = carbon_price_arr
         if horizon > n:
@@ -829,9 +1032,9 @@ class Controller:
         """
         Backward recursion: Index(t) = values[t] + q*Index(t+1). The last
         known value is treated as persisting forever beyond the modelled
-        horizon (Index(last) = values[last]/(1-q)) — the naive model's
-        perpetuity assumption, applied at the end of the horizon rather than
-        at the current timestep.
+        horizon (Index(last) = values[last]/(1-q)) — the same perpetuity
+        assumption the naive model already makes, just deferred to "after we
+        stop knowing anything" instead of "starting from right now".
         """
         n = len(values)
         index = np.empty(n)
@@ -1109,8 +1312,11 @@ class Controller:
         #carbon price
         self.carbon_price = self.carbon_price_time_series[self.t_controller]
         #update_prices_and_emmisions
-        # Precomputed in compute_discounted_indices(): gas price + carbon cost,
-        # plus any ICE driving-ban penalty.
+        # Reads from the precomputed path (see compute_discounted_indices()),
+        # which already folds in any ICE driving-ban cost shock -- see
+        # _unpack_ice_driving_ban_parameters(). Identical to the old
+        # gas_price_california_vec[t] + carbon_price*gas_emissions_intensity
+        # expression whenever ICE_driving_ban_time is None.
         self.gas_price = self.gas_cost_effective_vec[self.t_controller]
 
         self.electricity_emissions_intensity = self.electricity_emissions_intensity_vec[self.t_controller]
@@ -1129,17 +1335,21 @@ class Controller:
 
         self.production_subsidy = self.production_subsidy_time_series[self.t_controller]
 
-        # Forward-looking present-value indices at this timestep, read by
-        # socialNetworkUsers.py/firm.py when forward_looking_expectations is on.
+        # Forward-looking present-value indices at the current timestep (see
+        # compute_discounted_indices()). Only read by socialNetworkUsers.py/
+        # firm.py when forward_looking_expectations is on.
         self.gas_cost_index = self.gas_cost_index_vec[self.t_controller]
         self.gas_emissions_index = self.gas_emissions_index_vec[self.t_controller]
         self.electricity_cost_index = self.electricity_cost_index_vec[self.t_controller]
         self.electricity_emissions_index = self.electricity_emissions_index_vec[self.t_controller]
 
-        # Recomputed every step rather than triggered once on "==", so the
-        # flags stay correct wherever t_controller sits when
-        # setup_continued_run_future() re-derives *_ban_time for a new
-        # scenario. Passed to firms as step arguments, see update_firms().
+        # ICE sales/research bans (see _unpack_ice_sales_ban_parameters/
+        # _unpack_ice_research_ban_parameters) -- recomputed every step
+        # (rather than a one-shot "==" trigger) so they stay correct
+        # regardless of where t_controller sits when setup_continued_run_future
+        # re-derives *_ban_time for a new scenario. Passed down to firms as
+        # plain step arguments (like gas_price/carbon_price), not baked into
+        # any shared parameters_firm dict -- see update_firms() below.
         self.ice_sales_ban_active = (self.ICE_sales_ban_time is not None) and (self.t_controller >= self.ICE_sales_ban_time)
         self.ice_research_ban_active = (self.ICE_research_ban_time is not None) and (self.t_controller >= self.ICE_research_ban_time)
 
@@ -1263,25 +1473,31 @@ class Controller:
         self.time_steps_max = self.parameters_controller["time_steps_max"]
         self.save_timeseries_data_state = self.parameters_controller["save_timeseries_data_state"]
 
-        # Re-propagate to the already-constructed sub-objects. This controller
-        # is typically a deepcopy of one shared calibration reused across many
-        # policy scenarios (see package.resources.run.load_in_controller), so a
-        # per-scenario flag in updated_parameters would otherwise never reach
-        # the social_network/firm objects built in the original __init__.
+        # Re-propagate to the already-constructed sub-objects: this controller
+        # (and its social_network/firm_manager) is typically a deepcopy of a
+        # shared calibration reused across many future policy scenarios (see
+        # package.resources.run.load_in_controller), so a per-scenario flag in
+        # updated_parameters would otherwise have no effect on the objects
+        # built during the original __init__.
         self.forward_looking_expectations = self.parameters_controller.get("forward_looking_expectations", False)
         self.social_network.forward_looking_expectations = self.forward_looking_expectations
         for firm in self.firm_manager.firms_list:
             firm.forward_looking_expectations = self.forward_looking_expectations
 
-        # Recompute ICE_driving_ban_time/penalty for this scenario, used by
-        # compute_discounted_indices() below. No firm state to reset: the ban
-        # acts through the fuel-cost channel only.
+        # Same re-propagation for the ICE driving ban: recompute
+        # ICE_driving_ban_time/penalty for THIS scenario's updated_parameters
+        # (used by compute_discounted_indices() below). No firm-level state
+        # to reset -- the ban acts purely through the fuel-cost channel, not
+        # through any firm switch.
         self._unpack_ice_driving_ban_parameters()
 
-        # Recompute ICE_sales_ban_time/ICE_research_ban_time for this scenario.
-        # No firm state to reset either, since the active flags are rebuilt
-        # every step in update_time_series_data() and passed to firms as step
-        # arguments (see update_firms()).
+        # Same for the ICE sales/research bans: recompute ICE_sales_ban_time/
+        # ICE_research_ban_time for THIS scenario. Again no firm-level state
+        # to reset here -- ice_sales_ban_active/ice_research_ban_active are
+        # recomputed fresh every step in update_time_series_data() and passed
+        # down to firms as step arguments (see update_firms()), so there is
+        # nothing stale left over on the firm objects from the calibration
+        # this controller was deepcopied from.
         self._unpack_ice_sales_ban_parameters()
         self._unpack_ice_research_ban_parameters()
 

@@ -120,7 +120,7 @@ def save_data_csv_firms(firm_manager_firms_list,save_data_csv_list_firm_manager,
                 with open(csv_file_path, "w", newline="") as csv_file:
                     csv_writer = csv.writer(csv_file)
 
-                    # Write each list as one CSV row
+                    # Iterate through each list in your data and write it to the CSV file
                     for row in list_history:
                         csv_writer.writerow(row)
             else:
@@ -142,7 +142,7 @@ def save_data_csv_2D(data,fileName,title):
     csv_file_path = fileName + "/" + title + ".csv"
     with open(csv_file_path, "w", newline="") as csv_file:
         csv_writer = csv.writer(csv_file)
-        # Write each list as one CSV row
+        # Iterate through each list in your data and write it to the CSV file
         for row in data:
             csv_writer.writerow(row)
 
@@ -200,13 +200,21 @@ def get_num_workers():
     """
     Number of worker processes to hand to joblib.Parallel(n_jobs=...).
 
-    multiprocessing.cpu_count() reports the whole machine's CPU count and
-    ignores any SLURM/cgroup restriction on the job, which oversubscribes
-    badly on a shared cluster node. Preferred in order:
-      1. SLURM_CPUS_PER_TASK, set by sbatch from --cpus-per-task.
-      2. This process's CPU affinity mask (Linux only), which also reflects a
-         cgroup/cpuset restriction outside Slurm.
-      3. multiprocessing.cpu_count(), for Windows or no restriction.
+    multiprocessing.cpu_count() reports the WHOLE MACHINE's CPU count,
+    completely ignoring any SLURM/cgroup restriction on the current job --
+    on a shared cluster node this badly oversubscribes (e.g. spawning 384
+    workers when --cpus-per-task=64 only actually allocated 64 CPUs),
+    thrashing on context switches at best and risking an OOM kill at worst
+    since --mem is sized for the requested worker count, not the node's
+    full one.
+
+    Preferred in order:
+      1. SLURM_CPUS_PER_TASK -- what was actually requested/granted for
+         this job, set by sbatch from --cpus-per-task.
+      2. This process's own CPU affinity mask (Linux only) -- correctly
+         reflects a cgroup/cpuset restriction even outside Slurm.
+      3. multiprocessing.cpu_count() -- last resort (Windows, or no
+         restriction in place), same as the previous unconditional behaviour.
     """
     slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
     if slurm_cpus:
