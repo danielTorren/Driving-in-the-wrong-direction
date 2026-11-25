@@ -111,45 +111,8 @@ thin wrapper around generation and plotting code that already exists elsewhere i
 | S9, S10 | BAU EV uptake, emissions and elasticities over grid decarbonisation × electricity price | `supplementary_runs.fig09_10_bau_gen`, then `fig09_bau_timeseries_plot` and `fig10_bau_elasticity_plot` | `base_params_inputs_and_emissions.json`, `vary_sen_decarb.json`, `vary_sen_elec_price.json` |
 | S11–S14 | EV uptake in 2035 over a behavioural parameter × a policy intensity | `supplementary_runs.fig11_14_policy_grid_gen <11\|12\|13\|14>` | `base_params_vary_policy_joint.json`, `vary_policy_*.json` |
 
-Figures S2–S4 are external data and NK-landscape illustrations, not model output.
-`package/supplementary_runs/README.md` has the run counts, wall-clock estimates,
-memory sizing and the SLURM jobs, including how to resume a partial Figure S6 and
-how to reuse one BAU sweep across a pair of policy grids.
 
-### Ordering note
 
-The policy stages are sequential: the single-instrument analysis produces the
-intensity bounds used by the pair analysis, and `low_policy_intensity_gen`
-consumes the output folders of both. Paste those folder names into the
-`ENDOG_PAIR` and `ENDOG_SINGLE` constants at the top of
-`package/analysis/low_policy_intensity_gen.py`, or pass them on the command line:
-
-```bash
-uv run python -m package.analysis.low_policy_intensity_gen \
-    endog_pair_<timestamp> --single-policy endog_single_<timestamp>
-```
-
-Policy intensities are found by Bayesian optimisation over a Gaussian-process
-surrogate (`skopt.gp_minimize`), maximising expected improvement against the 95%
-uptake target with a 1% tolerance.
-
-Note that `single_experiment_gen.py` defines its parameters as an inline dict
-rather than loading a JSON config; it is the most convenient place to read off the
-full parameter set of Appendix B in one piece.
-
-### Not tied to a paper output
-
-`generating_data/` also holds exploratory sweeps kept for reference:
-`policy_sensitivity_gen`, `sen_vary_single_param_gen` (and its
-`_second_hand_cars` variant), `battery_cost_sen_gen`, `sweep_hhi_age_gen`,
-`ablation_gen`, `burn_in_ablation_gen`, `delta_carbon_price_gen`, and the
-single-parameter sweeps `a_chi_sweep_gen`, `b_chi_grid_search_gen`,
-`delta_sweep_gen`, `kappa_sweep_gen` and `seed_inputs_sweep_gen`.
-`analysis/policy_dominance.py` compares policy pairs across result folders, and
-`calibration/NN_multi_round_calibration_multi_gen.py` is the earlier multi-round
-form of the SBI calibration that `sbi_single_seed_gen.py` replaced.
-
----
 
 ## Repository layout
 
@@ -210,71 +173,6 @@ parameter sweeps consumed by the sensitivity runners.
 
 ---
 
-## Extensions present in the code but not used in the paper
-
-The model contains three optional mechanisms that are **disabled by default and
-switched off in every configuration shipped in this repository**. They produce no
-result reported in the paper, and are retained as a starting point for follow-up
-work on command-and-control policy and policy anticipation. Each is guarded, so
-omitting its parameter reproduces the published behaviour exactly.
-
-### ICE bans (command-and-control)
-
-The paper deliberately restricts itself to market-based instruments and excludes
-command-and-control policy. Three independent ban levers are nevertheless
-implemented, each taking effect a given number of months after the burn-in ends
-(the same convention as `ev_production_start_time`), and each defaulting to
-`None`, meaning "never":
-
-| Parameter | Effect |
-|---|---|
-| `ICE_research_ban_time` | Firms may no longer research or improve ICE technology. Existing ICE designs stay in firm memory and remain sellable. |
-| `ICE_sales_ban_time` | Firms may no longer offer *new* ICE cars. Already-sold ICEVs remain drivable and resellable on the used market. |
-| `ICE_driving_ban_time`, `ICE_driving_ban_penalty` | A per-unit cost shock added to effective ICE fuel cost from the ban date onward, reaching second-hand ICEVs too. |
-
-They are additive, so research-only, research+sales, and research+sales+driving
-scenarios can all be configured. The driving ban is modelled as a cost shock
-rather than a hard prohibition, which means it flows through the existing
-utility-driven choice mechanism and needs no new decision rule; the sales and
-research bans are hard constraints on firms' choice sets. All three validate that
-EV research or production has already begun before the ban bites.
-
-### Forward-looking expectations
-
-`forward_looking_expectations` (default `False`) switches agents away from the
-naive expectations used in the paper, under which the current energy price and
-emissions intensity are assumed to persist indefinitely and the discounted sum
-collapses to the closed-form geometric series of Appendix A. With the flag on,
-agents instead discount the actual known future path of fuel costs, electricity
-prices and grid carbon intensity.
-
-`controller.compute_discounted_indices()` precomputes present-value indices by
-backward recursion once per run, so the switch costs nothing per utility
-evaluation. Two subtleties are handled there: the carbon price is extended past
-the simulated horizon using its own schedule (so a temporary tax is not
-anticipated as a permanent one at its peak rate), while base energy prices and the
-decarbonisation trend are extended by holding their final value. With the flag
-off the indices are still computed but never read, so behaviour is unchanged.
-
-This is the channel through which forward-looking agents would anticipate an
-announced ban or a scheduled carbon price ahead of its arrival, over a horizon
-implied by the model's own discount and depreciation rates rather than a separate
-anticipation parameter. `docs/forward_looking/` works through the derivation.
-
-### Carbon price ramp and research subsidy
-
-`calculate_growth()` supports `flat`, `linear`, `quadratic` and `exponential`
-carbon price paths via `Carbon_price_state`. Every configuration here uses `flat`,
-since the paper applies policies at full intensity from January 2024 and holds
-them constant, but the ramp is the hook for time-varying schemes such as the EU
-ETS.
-The ramp is coded to *end* at the close of the policy period rather than persist
-at its final value.
-
-A sixth policy lever, `Research_subsidy`, is present in the policy state
-dictionary but is not among the five instruments analysed in the paper.
-
----
 
 ## Data sources
 

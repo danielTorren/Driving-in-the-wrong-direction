@@ -44,9 +44,6 @@ def plot_fig1_posterior(results_folder, n_params=2, dpi=300):
 
 
 if __name__ == "__main__":
-    # Most recent run against the CURRENT base_params_calibration.json
-    # (a_chi=1.351, b_chi=3.117) as of when this script was written -- swap
-    # in a newer results/sbi_single_seed_* folder if you re-ran generation.
     plot_fig1_posterior(
         results_folder="results/sbi_single_seed_15_38_23__11_08_2026",
     )

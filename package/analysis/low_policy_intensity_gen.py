@@ -51,20 +51,6 @@ def resolve_folder(name):
     return name if "/" in name else f"results/{name}"
 
 
-# Histories collected from every scenario run, as
-#   saved output key -> attribute path on the finished controller.
-#
-# This is the whole contract between the workers and everything downstream:
-# each worker returns exactly these, keyed by name, and single_policy_with_seeds
-# stacks them across seeds under the same names. Add an entry to collect more.
-#
-# It is deliberately NOT everything the model records. The per-entity histories
-# (history_car_age, which appends all 3000 car ages EVERY step, plus the
-# quality / efficiency / production-cost ones, which append a per-car-on-sale
-# array each step) used to be returned too and then thrown away by both callers.
-# At 768 steps and 64 seeds that was gigabytes shipped from the workers back to
-# the parent for nothing, and it OOM-killed the job. Do not re-add one unless
-# something actually reads it.
 SCENARIO_HISTORIES = {
     "history_driving_emissions": "social_network.history_driving_emissions",
     "history_production_emissions": "social_network.history_production_emissions",
@@ -114,18 +100,12 @@ def single_policy_with_seeds(params, controller_files):
             for name in SCENARIO_HISTORIES}
 
 
-# Single-policy reference trajectories drawn on top of the pairs in Figure 5.
-# policy name -> the Data/<name> the plotting script loads it back from. Their
-# intensities are NOT hardcoded here: they are read from the pair-gen run's
-# single_policy_outcomes, so they always match the endogenous single-policy
-# solution of the very run whose pairs are being plotted.
+
 SINGLE_POLICY_REFERENCES = {
     "Carbon_price": "outputs_carbon_tax",
     "Adoption_subsidy": "outputs_adoption_subsidy",
 }
 
-# Used only for pair-gen folders too old to carry single_policy_outcomes. These
-# are the values that were hardcoded here before, from a long-superseded run.
 FALLBACK_SINGLE_POLICY_INTENSITIES = {
     "Carbon_price": 0.910,
     "Adoption_subsidy": 36875.57,
@@ -137,25 +117,6 @@ def load_single_policy_intensities(fileName_load, single_policy_fileName=None):
     Endogenous single-policy intensities, i.e. the intensity of each instrument
     on its own that hits the EV uptake target.
 
-    Two sources, in order of precedence:
-
-    single_policy_fileName -- a results/endog_single_<timestamp> folder from
-        package.analysis.endogenous_policy_intensity_single_gen, whose
-        Data/policy_outcomes is a dedicated single-policy BO run (its own
-        n_calls, its own bounds from policy_bounds_endog_single_gen.json).
-        Missing or unreadable outcomes RAISE here rather than falling back:
-        asking for a specific folder and silently getting other numbers is how
-        Figure 5 ends up mislabelled.
-
-    fileName_load -- the pair-gen folder, whose Data/single_policy_outcomes is
-        the single-policy optimisation embedded in that run. Used when no
-        endog_single folder is given. Falls back to the old hardcoded values
-        for pair-gen folders too old to carry the file.
-
-    Either way the numbers come from a real optimisation run, NOT from
-    intensities hardcoded here -- but the two runs are separate optimisations,
-    so they do not have to agree. Whichever source is used gets printed and its
-    intensities are saved to the output folder as single_policy_intensities.
     """
     if single_policy_fileName is not None:
         # endog_single saves Data/policy_outcomes, with a "BAU" entry alongside
@@ -289,9 +250,7 @@ def main(fileNames,
 
     print("top_policies", list(top_policies.keys()), len( list(top_policies.keys())))
 
-    # Resolved here rather than beside the runs that use it at the bottom of this
-    # function: a bad single_policy_fileName then fails in seconds instead of
-    # after the whole BAU + pairs phase.
+
     single_policy_intensities = load_single_policy_intensities(fileName_load, single_policy_fileName)
     print("single_policy_intensities", single_policy_intensities)
 
@@ -358,13 +317,7 @@ def main(fileNames,
 
     ######################################################################################################
     #SINGLE POLICIES
-    #
-    # Reference trajectory for each instrument on its own, at the intensity the
-    # pair-gen run endogenously solved for. Previously these two intensities were
-    # hardcoded here (and again in low_policy_intensity_plot.py), so they silently
-    # went stale every time the pair-gen was re-run against new calibration
-    # parameters -- the single-policy lines in Figure 5 then described a different
-    # model than the pairs drawn beside them.
+
 
     save_object(single_policy_intensities, root_folder + "/Data", "single_policy_intensities")
 

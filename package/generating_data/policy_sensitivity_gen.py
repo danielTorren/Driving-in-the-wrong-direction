@@ -15,17 +15,6 @@ def _release_workers():
     Tear down joblib's worker pool and collect, between the policy phase and
     the BAU phase of run_cross_variation.
 
-    joblib's loky backend keeps its workers alive after a Parallel(...) call
-    returns so the next one can reuse them warm. Each worker here peaks at
-    ~1 GiB (measured: one 600-step, 3000-individual run), and CPython does
-    not hand that back to the OS, so a second Parallel call inherits 64
-    processes already sitting at their high-water mark and starts allocating
-    on top -- which is exactly where the BAU phase was getting OOM-killed
-    even though the policy phase before it had completed fine.
-
-    Shutting the executor down forces a fresh set of workers at baseline RSS
-    for the BAU phase. The cost is one pool respawn (~seconds against a
-    multi-minute phase).
     """
     try:
         from joblib.externals.loky import get_reusable_executor

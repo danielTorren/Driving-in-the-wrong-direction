@@ -97,12 +97,6 @@ class Firm:
 
         self.lambda_exp = parameters_firm["lambda"]
 
-        # Shared PROTOTYPE cache, keyed by component string: one entry per design,
-        # built once and never handed out directly. gen_neighbour_carsModel()
-        # returns a per-firm shallow copy of the prototype, so the expensive
-        # design data (NK attributes, neighbour strings) is computed once for the
-        # whole market while each firm keeps its OWN price/utility/profit state.
-        # See gen_neighbour_carsModel() for why that separation matters.
         self.universal_model_repo_ICE = parameters_firm["universal_model_repo_ICE"]
         self.universal_model_repo_EV = parameters_firm["universal_model_repo_EV"]
 
@@ -123,14 +117,6 @@ class Firm:
         # Backward compatible: absent => naive/permanent expectations (old behaviour).
         self.forward_looking_expectations = self.parameters_firm.get("forward_looking_expectations", False)
 
-        # ICE sales/research bans (optional, backward compatible: absent =>
-        # never banned). Unlike the ICE driving ban (a cost shock fed through
-        # gas_price, see controller._unpack_ice_driving_ban_parameters), these
-        # are hard structural constraints on this firm's own choice sets, so
-        # they're tracked as firm state and refreshed every step from the
-        # booleans controller.py computes off ICE_sales_ban_time/
-        # ICE_research_ban_time -- see next_step(), choose_cars_segments(),
-        # and innovate() below.
         self.ice_sales_ban_active = False
         self.ice_research_ban_active = False
 
@@ -282,17 +268,7 @@ class Firm:
         # C_m_price is NOT a cost and nobody ever pays it. It is the net price a
         # buyer would face if the firm charged its own marginal cost, and it
         # feeds only the Lambert-W argument below, which locates the markup.
-        # It is therefore read off C_m_cost, the same floored cost the price is
-        # built on: once the production subsidy covers the whole build cost the
-        # firm's marginal cost is zero, so selling at cost means selling at zero
-        # and the buyer's net price stops falling too. Reading it off the
-        # unfloored C_m - subsidy instead let it run negative, which told the
-        # markup formula the car was better than free and turned every unspent
-        # subsidy dollar into markup -- the consumer price then rose again past
-        # subsidy = build cost, and EV uptake peaked and fell. The outer
-        # max(0, ...) is the floor the demand side already applies (see
-        # calc_utility_cars_segments below, and socialNetworkUsers.
-        # vectorised_calculate_utility_new_cars): nobody is paid to take a car.
+
         C_m_price[ev_mask] = np.maximum(0.0, C_m_cost[ev_mask] - rebate_total)
 
         term1 = - C_m_price[:, np.newaxis] - self.gamma_s_values[np.newaxis, :]*E_m[:, np.newaxis] # Matrix with shape: num cars x num segments
@@ -313,13 +289,6 @@ class Firm:
 
         P = C_m_cost[:, np.newaxis] + (1.0 + LW)/self.kappa
 
-        # The buyer pays max(0, P - rebate), so demand is completely flat in P
-        # below P = rebate: there the rebate absorbs the whole price and raising
-        # P costs no volume at all. The Lambert-W price assumes demand responds
-        # to P one-for-one, which only holds above that kink, so a price it
-        # returns below the rebate is not an optimum. Profit (P - c)*share is
-        # strictly increasing across the flat region, so the best feasible point
-        # in it is the kink itself. Hence P* = max(rebate, C_m_cost + markup).
         if rebate_total > 0:
             P[ev_mask] = np.maximum(P[ev_mask], rebate_total)
 
@@ -356,12 +325,6 @@ class Firm:
 
         U = np.full((num_cars, self.num_segments), -np.inf)
 
-        # Broadcasting car data to match (num_cars, num_segments).
-        # np.broadcast_to gives a read-only stride-0 view instead of np.tile's
-        # materialised copy. Every one of these is only ever read, and read
-        # exactly once, through a boolean mask -- which selects the same values
-        # from a view as from a copy. P_adjust_values is left as a real array
-        # because it is written to below.
         shape = (num_cars, self.num_segments)
         Q_values = np.broadcast_to(car_data["Quality_a_t"][:, np.newaxis], shape)
         c_values = np.broadcast_to(car_data["fuel_cost_c"][:, np.newaxis], shape)
@@ -596,24 +559,7 @@ class Firm:
         Generate CarModel instances for neighboring technology strings.
 
         Each firm gets its OWN instance per design. The repo holds a prototype
-        per component string purely as a cache, and is never handed out: it
-        would otherwise make one Python object serve every firm that has ever
-        even considered that design, so a firm's own pricing/production step
-        would silently overwrite the price, segment utilities, expected profits
-        and choosen_tech_bool of a car a DIFFERENT firm currently has on sale,
-        and `car.firm` would point at whichever firm touched it last (breaking
-        per-firm profit attribution and the HHI built on top of it).
-
-        copy.copy, not deepcopy: the shallow copy deliberately keeps sharing the
-        read-only design data (attributes_fitness, inverted_tech_strings,
-        nk_landscape, parameters), which is the whole point of the cache and is
-        never mutated per firm. deepcopy would clone the entire NK landscape and
-        fork its random state -- ~2700x slower than simply reconstructing the
-        model, which is presumably why copying was dropped in the first place.
-        Every attribute a firm DOES write is rebound below so that no mutable
-        state is shared. `price` is deliberately left unset, matching a
-        freshly-constructed CarModel (CarModel.__init__ does not set it either);
-        it is assigned later by select_car_lambda_production().
+        per component string purely as a cache
 
         Returns:
             list: List of CarModel instances, one fresh instance per firm.
@@ -983,13 +929,6 @@ class Firm:
         """
         Main method to choose which cars will be sold based on profitability and utility.
 
-        ICE sales ban (self.ice_sales_ban_active, set from
-        controller.ICE_sales_ban_time -- see next_step()): once active, ICE
-        cars are removed from the candidate pool before profitability/utility
-        are even computed, so a firm can never pick one to sell again.
-        Requires ev_production_bool to already be True (validated in
-        controller._unpack_ice_sales_ban_parameters) so the EV branch below
-        always leaves at least one candidate.
 
         Returns:
             list: Selected cars to be offered on the market.
@@ -1078,18 +1017,6 @@ class Firm:
     def next_step(self, I_s_t_vec, W_vec, nu_UMax_vec, carbon_price, gas_price, electricity_price, electricity_emissions_intensity, rebate, production_subsidy, rebate_calibration, gas_cost_index=0.0, gas_emissions_index=0.0, electricity_cost_index=0.0, electricity_emissions_index=0.0, ice_sales_ban_active=False, ice_research_ban_active=False):
         """
         Advance the firm to the next time step. Updates cars, memory, and innovations.
-
-        ice_sales_ban_active/ice_research_ban_active are recomputed by
-        controller.py every step from ICE_sales_ban_time/ICE_research_ban_time
-        (see controller._unpack_ice_sales_ban_parameters/
-        _unpack_ice_research_ban_parameters) and simply latched onto this firm
-        -- see choose_cars_segments()/innovate() for where they take effect.
-        The moment the sales ban switches on, any ICE car still sitting in
-        cars_on_sale from a prior (pre-ban) period is flushed immediately
-        (rather than lingering until the next probabilistic
-        prob_change_production roll), and choose_cars_segments() is forced to
-        re-run right away so the firm doesn't limp along on a stale/thin
-        leftover EV lineup in the meantime.
 
         Returns:
             list: Cars on sale after production and innovation decisions.

@@ -31,10 +31,7 @@ class Firm_Manager:
         self.policy_distortion = 0
         self.profit_cumulative = 0
         self.random_state_input = parameters_firm_manager["random_state_input"]
-        # Substream off `seed` (not seed_inputs) for initial conditions, so the
-        # starting fleet and firm placement vary across replicates while the NK
-        # landscape stays pinned. Falls back to random_state_input so that older
-        # parameter dicts still load.
+
         self.random_state_init = parameters_firm_manager.get(
             "random_state_init", self.random_state_input
         )
@@ -44,21 +41,10 @@ class Firm_Manager:
         self.HHI_past_new_bought_vehicles_history = []
         self.margin_past_new_bought_vehicles_history = []
 
-        # EV share of new sales. Recorded every step by update_EV_sales(),
-        # independently of save_timeseries_data_state, because the calibration
-        # matches against it and does not want the rest of the time series
-        # overhead. Mirrors social_network.history_prop_EV, which is likewise
-        # always on. set_up_time_series_firm_manager() still clears it, so a
-        # continued future run restarts the series exactly as before.
+
         self.history_past_new_bought_vehicles_prop_ev = []
 
-        # Market concentration of new-car UNIT sales, recorded every step by
-        # update_HHI() for the same reason as the series above: the calibration
-        # matches against it and does not want the rest of the time series
-        # overhead. self.HHI is seeded here so calc_last_step_HHI() is safe to
-        # call on a run that never got past burn-in. history_HHI_revenue is the
-        # revenue-weighted variant, kept for reporting only (see
-        # calculate_market_concentration).
+
         self.HHI = 0
         self.history_HHI = []
         self.HHI_revenue = 0
@@ -76,16 +62,11 @@ class Firm_Manager:
         self.num_beta_segments = parameters_firm_manager["num_beta_segments"]
         self.num_gamma_segments = parameters_firm_manager["num_gamma_segments"]
 
-        # Initial fleet age, drawn Gamma(mean, std). A mean of 0 gives the original
-        # behaviour -- every car born at L_a_t = 0 on month 0 -- which caps the
-        # oldest possible car at t months and leaves the fleet-age transient still
-        # running through the whole calibration window.
+
         self.init_car_age_mean = parameters_firm_manager["init_car_age_mean"]
         self.init_car_age_std = parameters_firm_manager["init_car_age_std"]
         self.init_car_age_max = parameters_firm_manager.get("init_car_age_max", 600)
-        # Whether the starting fleet may ever be resold. Historically False,
-        # because 3000 simultaneous age-0 trade-ins would swamp the used lot; with
-        # a spread of starting ages the trade-ins arrive gradually instead.
+
         self.init_car_sellable = bool(parameters_firm_manager.get("init_car_sellable", False))
 
         # Where firms start on the NK landscape. See draw_initial_designs().
@@ -141,21 +122,6 @@ class Firm_Manager:
         """
         Draw starting ages (in months) for the initial fleet, L ~ Gamma(mean, std),
         truncated at init_car_age_max.
-
-        Gamma because it is a two-parameter family, so mean and spread are set
-        independently and both moments of the observed fleet can be matched at
-        once. Single-parameter alternatives cannot: uniform fixes sd = mean/sqrt(3)
-        and truncates the support at 2*mean, exponential fixes sd = mean. Against
-        the equilibrium measured from a 360-month burn-in (mean 16.2 yr, sd 10.8,
-        median 14.0, tail to 49 yr) gamma matches every moment, while uniform is
-        symmetric so its median sits at the mean, and its support stops at 32 yr.
-
-        A mean of 0 gives the original behaviour, every car born new. That leaves
-        the oldest car in the fleet at month t exactly t months old, so the age
-        distribution has no right tail until the model has run for decades -- which
-        is why the fleet-age transient used to run through the whole calibration
-        window. Kept as the off switch, and as the baseline rung of the burn-in
-        ablation.
 
         Drawn off random_state_init so the starting fleet varies across seeds while
         the NK landscape stays pinned to seed_inputs.
@@ -305,17 +271,6 @@ class Firm_Manager:
         self.beta_segment_idx = np.digitize(self.beta_vec, self.beta_bins) - 1
         self.gamma_segment_idx = np.digitize(self.gamma_vec, self.gamma_bins) - 1
 
-        # Precomputed flat segment index, for _count_segments(). beta and gamma
-        # segments are fixed for the whole run (they come from the fixed
-        # preference draws and the fixed quantile bins), so only the EV term
-        # varies per timestep.
-        #
-        # np.digitize returns len(bins) for a value equal to the top bin edge,
-        # so an index can land outside [0, num_segments) -- the individual
-        # holding the maximum beta, for one. Those fall into segment codes that
-        # are not in all_segment_codes, so the original counted them into a
-        # defaultdict entry that was never read back. in_range reproduces that
-        # exactly by dropping them.
         self._segment_in_range = (
             (self.beta_segment_idx >= 0) & (self.beta_segment_idx < self.num_beta_segments)
             & (self.gamma_segment_idx >= 0) & (self.gamma_segment_idx < self.num_gamma_segments)
@@ -330,9 +285,6 @@ class Firm_Manager:
         Returns:
             np.ndarray: Counts indexed to match all_segment_codes.
 
-        Replaces a per-individual Python loop that unboxed three NumPy scalars,
-        built a tuple and hashed it, num_individuals times per timestep. Integer
-        counting, so the result is exact.
         """
         flat = self._segment_flat_base + self.consider_ev_vec
         return np.bincount(flat[self._segment_in_range], minlength=self.num_segments)
@@ -431,16 +383,7 @@ class Firm_Manager:
         for segment in self.all_segment_codes:
             segment_W[segment] = self.min_W#RESET THEM INCASE
         
-        #UPDATE U MAX
-        # The two passes below were separate loops over the same cars and the
-        # same per-car segment dicts. They are independent of each other -- the
-        # W sum never reads maxU -- so running them together visits each (car,
-        # segment) pair once instead of twice. Each still sees the same values
-        # in the same order, so the running max and the running sum are
-        # unchanged.
-        # calc_exp is inlined here rather than called: it is a two-line wrapper
-        # invoked once per (car, segment) pair per timestep, so the Python call
-        # and the self.kappa lookup dominated the arithmetic it performs.
+
         market_data = self.market_data
         kappa = self.kappa
         for car in self.cars_on_sale_all_firms:
@@ -561,23 +504,6 @@ class Firm_Manager:
         Compute the Herfindahl-Hirschman Index (HHI) of new-car sales over a
         trailing 12-month window, from UNIT sales shares.
 
-        A firm's share is its count of cars sold divided by all cars sold, so a
-        $70k car and a $20k car each count once. This is the measure the
-        calibration target comes from: Grieco, Murry & Yurukoglu (2024) compute
-        HHI "at the parent company level" from Wards make-model UNIT sales
-        (falling from over 2500 to around 1200 on the 0-10000 scale, i.e. 0.25
-        to 0.12 as a fraction), and their C4 index is likewise a share of units.
-
-        This used to be a REVENUE share HHI (each car weighted by its price),
-        which is a different object: it measures concentration of industry
-        turnover, and it moves with within-firm pricing even when every firm
-        sells exactly as many cars as before. That variant is kept as
-        calculate_market_concentration_revenue() and reported alongside, but it
-        is not what 0.11-0.18 refers to.
-
-        NOTE: this method MUTATES the 12-month rolling window, so it must be
-        called at most once per step -- see update_HHI().
-
         Args:
             new_bought_vehicles (list): Vehicles sold this time step, one entry
                 per unit sold.
@@ -603,9 +529,6 @@ class Firm_Manager:
         if total_units == 0:
             return 0
 
-        # Units per firm, then the sum of squared unit shares. Counting in one
-        # pass keys on firm_id (Firm defines no __eq__, so this is the same
-        # identity comparison the revenue version does, without the J passes).
         units_per_firm = defaultdict(int)
         for car in all_purchases:
             units_per_firm[car.firm.firm_id] += 1
@@ -618,9 +541,6 @@ class Firm_Manager:
         """
         Revenue-weighted HHI over the same trailing 12-month window.
 
-        Reported for comparison only; the calibrated measure is the unit-share
-        HHI in calculate_market_concentration(). Reads the rolling window that
-        method already advanced this step rather than appending to it again.
 
         Returns:
             float: Revenue-share HHI as a fraction.
@@ -913,11 +833,6 @@ class Firm_Manager:
         """
         Record the EV proportion of the vehicles bought in the previous step, and append it to the history.
 
-        Called from next_step() rather than save_timeseries_data_firm_manager()
-        so the calibration gets this series without switching on
-        save_timeseries_data_state. past_new_bought_vehicles is set immediately
-        before this call and is not touched again during the step, so the value
-        stored at index t is identical to what the old save path recorded.
         """
         if self.past_new_bought_vehicles:
             self.history_past_new_bought_vehicles_prop_ev.append(sum([1 for car in self.past_new_bought_vehicles if car.transportType == 3])/len(self.past_new_bought_vehicles))
@@ -928,22 +843,6 @@ class Firm_Manager:
         """
         Compute this step's market concentration and append it to the history.
 
-        This is now the ONLY per-step call to calculate_market_concentration().
-        That method mutates the 12-step rolling purchase window
-        (HHI_past_new_bought_vehicles_history), so calling it a second time in
-        the same step would push the same purchase list in twice and halve the
-        effective window; save_timeseries_data_firm_manager() and
-        calc_last_step_HHI() therefore read self.HHI instead of recomputing it.
-
-        Called from next_step() straight after update_EV_sales(), so index t of
-        history_HHI lines up with index t of
-        history_past_new_bought_vehicles_prop_ev and of
-        social_network.history_prop_EV -- which is what lets the calibration
-        address all of them with one month-offset convention.
-
-        self.HHI is the UNIT-share HHI (the calibrated measure). The
-        revenue-weighted variant is recorded next to it, from the same window,
-        for reporting only.
         """
         self.HHI = self.calculate_market_concentration(self.past_new_bought_vehicles)
         self.history_HHI.append(self.HHI)

@@ -7,11 +7,6 @@ def _attr_array(list_vehicles, name, dtype=np.float64):
     """
     Read one attribute off every vehicle into a NumPy array.
 
-    np.fromiter over a C-level attrgetter, rather than np.array over a list
-    comprehension: it skips the intermediate Python list entirely and writes
-    into the output buffer directly. Same values, same dtype, roughly half the
-    time -- which matters here because the stock is walked once per attribute,
-    once per timestep.
     """
     return np.fromiter(map(attrgetter(name), list_vehicles), dtype=dtype, count=len(list_vehicles))
 
@@ -81,9 +76,6 @@ class SecondHandMerchant:
             dict: Dictionary mapping attribute names to NumPy arrays.
         """
             
-        # "price" is deliberately left empty -- nothing downstream reads it off
-        # this dict (the price is what calc_car_price_heuristic computes), and
-        # the original never populated it either.
         vehicle_dict_vecs = {
             "Quality_a_t": _attr_array(list_vehicles, "Quality_a_t"),
             "Eff_omega_a_t": _attr_array(list_vehicles, "Eff_omega_a_t"),
@@ -152,9 +144,6 @@ class SecondHandMerchant:
         normalized_second_hand_efficiency = second_hand_efficiency / first_hand_efficiency_max
         normalized_second_hand_B = second_hand_B / first_hand_B_max
 
-        # Compute proximity (Euclidean distance) for all second-hand cars to all first-hand cars.
-        # Accumulated into two (second_hand x new) buffers rather than the six
-        # the original expression allocated; same operations in the same order.
         distances = normalized_second_hand_quality[:, np.newaxis] - normalized_first_hand_quality
         np.square(distances, out=distances)
 
@@ -171,22 +160,12 @@ class SecondHandMerchant:
         # Find the closest first-hand car for each second-hand car
         closest_idxs = np.argmin(distances, axis=1)
 
-        # Get the prices of the closest first-hand cars. The EV rebate only
-        # exists on EVs, so it may only be netted off an EV anchor price -- an
-        # ICE anchor is quoted at its full price. Matching is done on
-        # (Quality, Efficiency, B), and B separates the two drivetrains (fuel
-        # tank vs battery), so a used ICE matches an ICE anchor essentially
-        # always; deducting the EV rebate there wrote the subsidy into the
-        # resale value of the whole ICE fleet.
+
         matched_is_ev = vehicle_dict_vecs_new_cars["transportType"][closest_idxs] == 3
         rebate_deduction = np.where(matched_is_ev, self.rebate_calibration + self.rebate, 0.0)
         closest_prices = np.maximum(first_hand_prices[closest_idxs] - rebate_deduction, 0)
 
-        # Adjust prices based on car age and depreciation. The gross series --
-        # the same anchor with the EV rebate left in -- is returned alongside so
-        # that update_stock_contents can retire cars on physical value rather
-        # than on a price the rebate has driven to zero. See
-        # Social_Network.calc_offer_prices_heursitic for the full reasoning.
+
         depreciation = (1 - second_hand_delta_P) ** second_hand_ages
         adjusted_prices = closest_prices * depreciation
         adjusted_prices_gross = first_hand_prices[closest_idxs] * depreciation
@@ -201,17 +180,6 @@ class SecondHandMerchant:
             - Enforce max inventory constraint.
         """
             
-        #check len of list
-        # Rebuilt in one pass rather than calling list.remove() while iterating
-        # over the same list: mutating a list mid-for-loop shifts later
-        # elements into the just-vacated slot, which the iterator then skips
-        # over -- so two adjacent over-age cars would previously leave the
-        # second one stuck in stock past its age limit.
-        # The over-age test is a vectorised comparison and the surviving stock
-        # is rebuilt with itertools.compress, so the Python-level loop only
-        # runs over the cars actually being scrapped (a handful) instead of
-        # over the whole stock. Ascending index order is preserved, so the
-        # bookkeeping lists are appended to in exactly the original order.
         over_age = _attr_array(self.cars_on_sale, "second_hand_counter", np.int64) > self.age_limit_second_hand
         if over_age.any():
             for idx in np.flatnonzero(over_age):
@@ -257,14 +225,7 @@ class SecondHandMerchant:
         if len(self.cars_on_sale) > self.max_num_cars:
             # Calculate how many cars to remove
             num_cars_to_remove = len(self.cars_on_sale) - self.max_num_cars
-            # Randomly select cars to remove. Drawing the POSITIONS rather than
-            # the objects consumes the identical random stream -- RandomState.
-            # choice(n, k, replace=False) and choice(seq, k, replace=False) both
-            # reduce to permutation(n)[:k] -- but lets the survivors be selected
-            # with a boolean mask. The original tested `car not in cars_to_remove`
-            # against a NumPy object array once per car in stock, i.e. a full
-            # elementwise comparison per car: quadratic in the size of the stock,
-            # which is exactly the quantity being increased here.
+
             idxs_to_remove = self.random_state.choice(
                 len(self.cars_on_sale), num_cars_to_remove, replace=False
             )
@@ -294,12 +255,6 @@ class SecondHandMerchant:
         """
         Mark a vehicle as sold out of the merchant's stock.
 
-        The stock list itself is left alone until compact_stock() runs at the
-        end of the users' choice loop. list.remove() is a linear scan, and it
-        was being called once per second-hand sale against a stock of
-        max_num_cars -- quadratic per timestep in exactly the quantity being
-        scaled up. Nothing reads cars_on_sale between the first sale of a
-        timestep and compact_stock(), so deferring is not observable.
 
         Args:
             vehicle (object): Vehicle object to remove.
@@ -310,14 +265,6 @@ class SecondHandMerchant:
         """
         Drop the vehicles marked by remove_car() from the stock.
 
-        Mutates cars_on_sale in place rather than rebinding it: the social
-        network holds a reference to this same list object (controller.
-        get_second_hand_cars returns it directly), and rebinding here would
-        leave that reference pointing at the pre-sale stock.
-
-        Order is unchanged -- survivors keep their relative order and cars
-        taken in trade during the same step stay appended at the end, exactly
-        as with the interleaved list.remove()/append() the original did.
         """
         if not self._sold_ids:
             return
@@ -350,9 +297,7 @@ class SecondHandMerchant:
         Args:
             list_cars (list): List of vehicle objects currently in stock.
         """
-        # Loop-invariant lookups hoisted out: this walks the whole stock, so
-        # every self.<attr> inside the body was one dict lookup per car per
-        # timestep.
+
         age_the_stock = self.t_second_hand_cars > self.burn_in_second_hand_market
         gas_price = self.gas_price
         gas_cost_index = self.gas_cost_index

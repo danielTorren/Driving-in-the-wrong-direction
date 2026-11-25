@@ -1,28 +1,6 @@
 """
 Engine for a one-parameter sweep that records new-car HHI and fleet car age.
 
-Both are calibration targets with published bands (0.11-0.18 and 10-12 years),
-and most single parameters move them together rather than independently, so the
-useful question is never "what does this parameter do to HHI" but "is there any
-value of it that puts both series inside their bands at once". This module runs
-that experiment; the thin entry scripts next to it supply the parameter.
-
-Entry points that use it:
-    package/generating_data/kappa_sweep_gen.py   parameters_vehicle_user.kappa
-    package/generating_data/delta_sweep_gen.py   parameters_ICE.delta
-
-Outputs one results/<param>_sweep_<timestamp> folder holding
-  Data/param_list, Data/param_name, Data/param_label, Data/base_params,
-  Data/summary
-  Data/data_array_hhi          (n_values, seeds, T)   unit-share new-car HHI
-  Data/data_array_age_fleet    (n_values, seeds, T)   whole-fleet mean age, MONTHS
-  Data/data_array_ev_prop      (n_values, seeds, T)
-plus the two figures written by package/plotting_data/sweep_hhi_age_plot.py.
-
-The HHI series only exists when save_timeseries_data_state is 1 --
-history_market_concentration is appended from
-Firm_Manager.save_timeseries_data_firm_manager(), which is gated on it. The base
-JSON already sets it; do not switch it off.
 """
 import json
 import sys
@@ -113,11 +91,7 @@ def run_sweep(param_name, subdict, values, param_label, seeds, precheck=None):
         age_all.append(age)
         ev_all.append(ev)
 
-        # Dropped explicitly, not left to rebinding on the next iteration:
-        # `outputs` holds every MULTI_SEED_ARRAY_KEYS series plus the cars_on_sale
-        # object snapshot for every seed, and plain rebinding would build the next
-        # value's dict while the previous one is still referenced, so the parent
-        # would peak at two of them on top of the live workers.
+
         del outputs
 
         row = {

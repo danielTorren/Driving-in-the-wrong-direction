@@ -99,14 +99,6 @@ def analyze_results(
     """
     Perform sobol analysis on simulation results
     """
-    #print(problem)
-
-    #print(Y_emissions_stock.shape, )
-    #print(calc_second_order)
-    #N_samples = 64
-
-    #expected_size = (2 * len(problem["names"]) + 2) * N_samples if calc_second_order else (len(problem["names"]) + 2) * N_samples
-    #print(f"Expected Y size: {expected_size}, Actual: {len(Y_emissions_stock)}")
 
 
     Si_emissions_stock = sobol.analyze(

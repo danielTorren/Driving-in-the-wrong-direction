@@ -57,10 +57,6 @@ def plot_single_ev_prop(folder, real_data, dpi=200):
                          mean_data - ci_range, mean_data + ci_range,
                          color=colors[i], alpha=0.2)
 
-    # 3. Handle Real-World Data (Optional: Adjusting to match date axis)
-    # If real_data starts at a different date, you'll need to create a specific 
-    # date range for it. Assuming it aligns with the calibration logic:
-    # (Leaving this as standard steps or you can convert time_steps_real to dates too)
 
     # Formatting
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y'))

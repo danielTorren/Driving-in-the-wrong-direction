@@ -673,24 +673,6 @@ def plot_emissions_tradeoffs_reference_lines(
     rather than as a point: zero net cost on the top panel and BAU utility on
     the bottom one.
 
-    BAU sits well to the right in emissions, so its marker cannot share the axes
-    with the policy cloud without squashing it (see
-    plot_emissions_tradeoffs_bau_inset). A horizontal line carries the part of
-    BAU that matters for the comparison and costs no x-range.
-
-    utility_as_pct_of_bau rescales the bottom panel to utility as a percentage
-    of BAU utility; the benchmark line is dropped there, since the axis itself
-    already carries BAU.
-    emissions_as_pct_of_bau does the same to the shared x axis. No 100% line is
-    drawn there: the axis stays zoomed on the policy points, and BAU emissions
-    are read off the axis scale instead.
-    show_zero_net_cost_line=False drops the zero net cost line from the top
-    panel; the top axis is then scaled to the policy points alone.
-    x_err_in_limits=True widens the x axis to hold the whole emissions
-    confidence bar of every point. Those bars are several percentage points
-    wide, so it roughly doubles the x range and squashes the policy cloud;
-    by default x is scaled to the means and the bars are allowed to run off
-    the sides, as in the other full-scale figures.
     """
     okabe_ito_colors = ['#E69F00', '#009E73', '#56B4E9', '#F0E442',
                         '#0072B2', '#D55E00', '#CC79A7', '#000000']
@@ -756,10 +738,7 @@ def plot_emissions_tradeoffs_reference_lines(
                     xytext=(0, 4), textcoords="offset points",
                     ha="right", va="bottom", fontsize=11, color="0.25")
 
-    # --- Limits: scaled to the confidence bars on y, so the caps of every bar
-    # stay inside the axes, plus pad_frac of the span on each side. The
-    # reference line is kept in view even if every policy point sits on one
-    # side of it.
+
     def _limits(key, reference, with_err=True):
         values = ([r[key] for r in records] if not with_err
                   else [r[key] - r[f"{key}_err"] for r in records]
@@ -769,10 +748,6 @@ def plot_emissions_tradeoffs_reference_lines(
         span = hi - lo if hi > lo else abs(hi) or 1.0
         return lo - pad_frac * span, hi + pad_frac * span
 
-    # x is always scaled to the policy points alone: BAU emissions sit far to
-    # the right (100% when rescaled), and reserving room for them would leave
-    # most of the axis empty. The emissions bars are wide enough that including
-    # them costs more legibility than it buys, hence x_err_in_limits.
     ax_top.set_xlim(*_limits(x_key, None, with_err=x_err_in_limits))
     ax_top.set_ylim(*_limits("c", top_ref))
     ax_bottom.set_ylim(*_limits(y_bottom, bottom_ref))

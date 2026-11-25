@@ -8,10 +8,6 @@ class NKModel_EV:
     efficiency, and production cost, incorporating user behavior and environmental policy parameters.
     """
 
-    # `rho` is given in the paper's feature order: the baseline feature (production
-    # cost, rho = 1 by construction) first, then quality, efficiency, battery size.
-    # The landscape columns follow `min_vec`: quality, efficiency, cost, battery size.
-    # RHO_TO_ATTR[rho_idx] gives the landscape column of that rho entry.
     RHO_TO_ATTR = (2, 0, 1, 3)
 
 
@@ -72,12 +68,7 @@ class NKModel_EV:
         self.min_vec = np.asarray([self.min_Quality, self.min_Efficiency, self.min_Cost, self.min_Battery_size])
         self.max_vec = np.asarray([self.max_Quality, self.max_Efficiency, self.max_Cost, self.max_Battery_size])
 
-        # Dispersion stretch, one factor per attribute -- see the same block in
-        # nkModel_ICE for why it exists and why the keys are named rather than
-        # positional. stretch_Quality is forced to match the ICE landscape's in
-        # controller.__init__, alongside min_Quality/max_Quality, because Quality
-        # is compared ACROSS drivetrains in the choice utility and two different
-        # quality scales would not be comparable.
+
         self.stretch_vec = np.asarray([
             parameters.get("stretch_Quality", 1.0),
             parameters.get("stretch_Efficiency", 1.0),
@@ -135,9 +126,7 @@ class NKModel_EV:
         min_fitness = fitness_values[min_index]
         min_fitness_string = binary_strings[min_index]
 
-        # The sampled designs ranked worst-first. Placing every firm one bit-flip
-        # from min_fitness_string puts them all in a single basin; this lets them
-        # be spread across the bad end of the landscape instead.
+
         self.sampled_strings_ranked = binary_strings[np.argsort(fitness_values)]
 
         # Populate attributes_dict
@@ -172,11 +161,6 @@ class NKModel_EV:
         """
         Map averaged fitness components onto the attribute ranges.
 
-        Without a stretch this is the original expression, unchanged and
-        bit-identical. With one, each attribute's deviation from the midpoint is
-        multiplied by its factor and the result is clipped back into
-        [min, max] -- see the stretch_vec comment in __init__. Broadcasting
-        handles both the (num_designs, A) and the (A,) case.
         """
         if not self.stretch_active:
             return self.min_vec + average_fitness_components*(self.max_vec - self.min_vec)

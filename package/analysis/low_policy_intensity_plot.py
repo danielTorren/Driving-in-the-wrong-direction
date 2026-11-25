@@ -83,10 +83,6 @@ def plot_combined_policy_figures_with_utilty_flow_cost_both(
     outputs[("Carbon_price",)] = output_carbon_tax
     outputs[("Adoption_subsidy",)] = output_adoption_subsidy
 
-    # Intensities come from the gen run's single_policy_intensities, which it
-    # took from the pair-gen's endogenous single-policy solution. The fallbacks
-    # are the values that used to be hardcoded here, for older results folders
-    # saved before that file existed.
     intensities = single_policy_intensities or {}
     top_policies[("Carbon_price",)] = {
         "policy1_value": intensities.get("Carbon_price", 0.910),

@@ -7,11 +7,6 @@ class NKModel_ICE:
     This class models how different component combinations (designs) affect car attributes such as quality,
     efficiency, and production cost, incorporating user behavior and environmental policy parameters.
     """
-
-    # `rho` is given in the paper's feature order: the baseline feature (production
-    # cost, rho = 1 by construction) first, then quality, efficiency.
-    # The landscape columns follow `min_vec`: quality, efficiency, cost.
-    # RHO_TO_ATTR[rho_idx] gives the landscape column of that rho entry.
     RHO_TO_ATTR = (2, 0, 1)
 
     
@@ -72,22 +67,6 @@ class NKModel_ICE:
         self.min_vec = np.asarray([self.min_Quality, self.min_Efficiency, self.min_Cost])
         self.max_vec = np.asarray([self.max_Quality, self.max_Efficiency, self.max_Cost])
 
-        # Dispersion stretch, one factor per attribute. A design's attribute is the
-        # MEAN of N component draws, so it concentrates on the midpoint with sd
-        # 1/sqrt(12N) = 0.075 at N=15: the realised p1-p99 covers only about a
-        # THIRD of [min, max], and the empirically calibrated bounds are never
-        # reached. The stretch multiplies each attribute's deviation from the
-        # midpoint, so stretch = 3 makes the realised range fill the stated
-        # bounds and makes min_*/max_* mean what their names say.
-        #
-        # Named per attribute rather than a positional list, because `rho` is
-        # indexed in the paper's feature order (cost first) while these follow
-        # min_vec (quality, efficiency, cost, battery). Keyed lookups avoid
-        # silently applying a factor to the wrong attribute.
-        #
-        # Default 1.0 everywhere reproduces the untouched mapping, and the
-        # all-ones case takes the original code path so it is bit-identical
-        # rather than merely algebraically equal.
         self.stretch_vec = np.asarray([
             parameters.get("stretch_Quality", 1.0),
             parameters.get("stretch_Efficiency", 1.0),
@@ -194,11 +173,6 @@ class NKModel_ICE:
         """
         Map averaged fitness components onto the attribute ranges.
 
-        Without a stretch this is the original expression, unchanged and
-        bit-identical. With one, each attribute's deviation from the midpoint is
-        multiplied by its factor and the result is clipped back into
-        [min, max] -- see the stretch_vec comment in __init__. Broadcasting
-        handles both the (num_designs, A) and the (A,) case.
         """
         if not self.stretch_active:
             return self.min_vec + average_fitness_components*(self.max_vec - self.min_vec)

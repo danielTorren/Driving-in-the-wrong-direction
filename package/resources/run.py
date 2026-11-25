@@ -13,12 +13,7 @@ from package.model.controller import Controller
 from package.resources.utility import load_object, get_num_workers
 from copy import deepcopy
 
-# modules
-####################################################################################################################################################
-#LOAD IN THE DATA TIME SERIES
-#THE IDEA HERE IS THAT I LOAD IN ALL THE TIME SERIES DATA FOR CALIFORNIA FROM 2001 TO 2022 WHere i have it
 
-#####################################################################################################################################################
 ####SINGLE SHOT RUN
 def generate_data(parameters: dict,print_simu = 0):
     """
@@ -35,9 +30,7 @@ def generate_data(parameters: dict,print_simu = 0):
         Social network that has evolved from initial conditions
     """
 
-    #load_in_output_data()
-    #future_electricity_emissions_intensity_data = future_calibration_data()
-    
+
     calibration_data_input = load_object("package/calibration_data", "calibration_data_input")
     parameters["calibration_data"] =  calibration_data_input
 
@@ -47,15 +40,11 @@ def generate_data(parameters: dict,print_simu = 0):
 
     controller = Controller(parameters)
 
-    #print(controller.t_controller)
-    #print("outside")
-    #### RUN TIME STEPS
-    """FIX THIS!!!"""
-    while controller.t_controller < parameters["time_steps_max"]:
-        #print(controller.t_controller,"before next step")
-        controller.next_step()
-        #print(controller.t_controller,"inside")
 
+    #### RUN TIME STEPS
+
+    while controller.t_controller < parameters["time_steps_max"]:
+        controller.next_step()
     if print_simu:
         print(
             "SIMULATION time taken: %s minutes" % ((time.time() - start_time) / 60),
@@ -66,19 +55,11 @@ def generate_data(parameters: dict,print_simu = 0):
 
 def load_in_controller(controller_load, base_params_future):
 
-    #Need to change stuff so that it now runs till the future
+
     base_params_future["time_steps_max"] = controller_load.duration_burn_in + controller_load.duration_calibration + base_params_future["duration_future"]
-    #print(base_params_future["save_timeseries_data_state"])
-    #print(base_params_future["time_steps_max"],  controller_load.duration_burn_in,  controller_load.duration_calibration , base_params_future["duration_future"])
 
     controller_load.setup_continued_run_future(base_params_future)
-    #### RUN TIME STEPS
-    # Matches generate_data()'s own loop convention (< time_steps_max, not
-    # time_steps_max - 1) -- the "-1" here previously simulated the future
-    # period one month short of the requested duration_future every time
-    # (calibration itself, via generate_data, has always ended exactly at
-    # t_controller == duration_burn_in + duration_calibration, so this loop
-    # needs to add exactly duration_future MORE steps, not duration_future - 1).
+
     while controller_load.t_controller < base_params_future["time_steps_max"]:
         controller_load.next_step()
 
@@ -360,10 +341,6 @@ def generate_multi_seed(params: dict):
         "history_mean_car_age": social_network.history_mean_car_age,
         "history_past_new_bought_vehicles_prop_ev": firm_manager.history_past_new_bought_vehicles_prop_ev,
         "cars_on_sale": firm_manager.cars_on_sale_all_firms,
-        # Calibration-target diagnostics — see Social_Network.record_calibration_targets.
-        # history_mean_car_age_fleet is the WHOLE-FLEET mean age, which is what the
-        # 10-12 year target refers to; history_mean_car_age above averages only the
-        # vehicles chosen this step.
         "history_mean_car_age_fleet": social_network.history_mean_car_age_fleet,
         "history_new_car_price_quantiles": social_network.history_new_car_price_quantiles,
         "history_used_car_price_quantiles": social_network.history_used_car_price_quantiles,

@@ -1,24 +1,6 @@
 """
 Grid search over b_chi for calibration.
 
-Sweeps parameters_social_network.b_chi across the values in
-constants/vary_single_b_innov.json, using constants/base_params_vary_single.json
-as the base, and scores every value against the California EV stock share.
-
-Unlike vary_single_param_gen this records EV uptake ONLY (ev_prop_parallel_run,
-not ev_prop_price_emissions_parallel_run): prices and margins play no part in
-picking b_chi, and dropping them keeps the per-worker memory down so more seeds
-fit in one job.
-
-Two outputs:
-  1. Plots/b_chi_grid_search.png -- ONE axes, one mean line per b_chi value with
-     its 95% CI, against the observed series. This is the figure to read.
-  2. Data/rmse_of_mean + Data/rmse_per_seed -- the grid-search score, printed as
-     a ranked table at the end of the run.
-
-Scoring follows the NN calibration convention exactly: the model is sampled at
-APRIL of each observed year (STOCK_MONTH_OFFSET on _year_start_index), so the
-scores here are comparable with the EV-stock block of that calibration's x.
 """
 
 import json
@@ -36,14 +18,9 @@ from package.resources.utility import (
     save_object,
 )
 
-# First year of calibration_data_output["EV Prop"], set by the 2010-2023 filter
-# in calibration/calibration_data_outputs.py. The array carries no year labels,
-# so this is the only thing tying its entries to model time steps.
 DATA_START_YEAR = 2010
 
-# Copied from calibration/NN_multi_round_calibration_multi_gen.py rather than
-# imported: that module imports torch and sbi at module scope, which this job has
-# no use for. Keep the two in step if the calibration convention changes.
+
 STOCK_MONTH_OFFSET = 3   # APRIL index, the month the EV stock (population) data refers to
 
 
@@ -67,9 +44,6 @@ def observed_step_indices(base_params: dict, num_obs: int, series_length: int):
     Model time-step index of each observed data point, and the observations it
     can actually score.
 
-    Returns (step_indices, num_used). Years whose April falls past the end of the
-    run are dropped rather than allowed to raise, so a base_params with a shorter
-    duration_calibration still scores on the years it does cover.
     """
     steps = np.array([
         _year_start_index(DATA_START_YEAR + k, base_params) + STOCK_MONTH_OFFSET
@@ -83,11 +57,6 @@ def score_grid(data_array, real_data, base_params):
     """
     RMSE of every b_chi value against the observed EV stock share.
 
-    rmse_of_mean is the primary score: calibration matches the seed-AVERAGED
-    series, so averaging first and scoring once is the like-for-like comparison.
-    rmse_per_seed is kept alongside it to show how much of any gap is seed noise
-    -- a value whose rmse_of_mean is good only because seeds cancel out is not
-    actually a good fit.
     """
     series_length = data_array.shape[2]
     steps, num_used = observed_step_indices(base_params, len(real_data), series_length)

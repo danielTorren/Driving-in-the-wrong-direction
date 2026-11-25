@@ -127,15 +127,7 @@ def save_data_csv_firms(firm_manager_firms_list,save_data_csv_list_firm_manager,
                 with open(csv_file_path, "w", newline="") as csv_file:
                     csv_writer = csv.writer(csv_file)
                     csv_writer.writerow(list_history)
-                """
-                list_history = getattr(firm_manager_firms_list[firm_id], title)
-                #print("LIST",title +"_firm_id_" + str(firm_id),list_history)
-                array_history = np.asarray(list_history)
-                #print("ARRAY",title +"_firm_id_" + str(firm_id),array_history)
-                file_label = fileName + "/" + title +"_firm_id_" + str(firm_id) + ".csv"
-                print("file_label",file_label)
-                np.savetxt(file_label, array_history, delimiter=",")
-                """
+
             
 def save_data_csv_2D(data,fileName,title):
 

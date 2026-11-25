@@ -782,11 +782,6 @@ def plot_calibration_targets(base_params, fileName, outputs, dpi=200):
     and whole-fleet mean age. Each panel title carries the final-year mean and
     the target, so "how is it doing" is readable without measuring the axes.
 
-    The quality-spread panel has no published target. It plots the dollar value
-    of the used stock's quality range against the used stock's own price range,
-    both in dollars on one axis. When the quality spread is far below the price
-    spread, trading down to a cheaper car costs little utility and the fleet
-    churns; that ratio is annotated.
     """
     burn_in = base_params["duration_burn_in"]
 
@@ -852,14 +847,7 @@ def plot_calibration_targets(base_params, fileName, outputs, dpi=200):
     ax.set_ylabel("Dollars", fontsize=14)
     ax.set_ylim(0, max(np.nanpercentile(mean_width, 95), np.nanpercentile(mean_qual, 95))*1.6)
 
-    # The ratio itself, on a twin axis. The two dollar series show where it comes
-    # from, but only the ratio is comparable across runs, and it is what has to
-    # stay near 1 -- so it gets a drawn line and a target rather than a number in
-    # the title. It is the check on compressing stretch_Cost: that pulls the
-    # new-car price IQR down towards target, but it can do so by flattening the
-    # quality-cost ladder instead of tightening the market, and only this panel
-    # tells the two apart. Ratio near 1 means trading down to a cheaper car costs
-    # real utility; well below 1 means it is nearly free and the fleet churns.
+
     ax_r = ax.twinx()
     with np.errstate(invalid="ignore", divide="ignore"):
         ratio_series = qual_spread/np.where(used_width == 0, np.nan, used_width)

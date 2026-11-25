@@ -81,7 +81,7 @@ def run_bau_for(fig_number, base_params_load=BASE_PARAMS_LOAD):
     runs needlessly.
 
     Use this to finish a run whose policy phase completed and was saved but
-    whose BAU phase died (e.g. the OOM kill on the 21/08/2026 jobs): the
+    whose BAU phase died: the
     cross_* folder already on disk keeps its data_cross_ev, and
     load_and_plot_combined takes the BAU array from this separate folder via
     its bau_results_folder argument.

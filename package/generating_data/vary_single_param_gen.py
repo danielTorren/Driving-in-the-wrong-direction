@@ -68,9 +68,3 @@ if __name__ == "__main__":
         VARY_LOAD ="package/constants/vary_single_b_innov.json"
         )
     
-    #OLD
-    #vary_single_max_num_cars_prop.json", 
-#        VARY_LOAD ="package/constants/vary_single_include_self_social_state.json"
-    #income_mu
-    #vary_income_sigma.json"
-    #vary_income_mu
